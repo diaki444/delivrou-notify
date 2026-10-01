@@ -42,6 +42,12 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
+// Redirige la racine vers le tableau de bord, pour eviter un "Cannot GET /"
+// confus quand on visite juste le domaine.
+app.get("/", (_req, res) => {
+  res.redirect("/dashboard");
+});
+
 // Pas d'authentification : juste pour un check de vie basique (load balancer, uptime monitor).
 app.get("/health", (_req, res) => {
   res.json({ ok: true });
