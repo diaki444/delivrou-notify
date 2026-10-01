@@ -35,6 +35,13 @@ export interface SendLogEntry {
   timestamp: number; // unix ms
 }
 
+export interface MessageTemplate {
+  id: string;
+  name: string;
+  body: string;
+  createdAt: number;
+}
+
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
 const DATA_FILE = path.join(AUTH_DIR, "dashboard_data.json");
 
@@ -45,11 +52,13 @@ interface DiskShape {
   chats: Record<string, ChatMeta>;
   messages: Record<string, StoredMessage[]>;
   sendLog: SendLogEntry[];
+  templates: MessageTemplate[];
 }
 
 let chats = new Map<string, ChatMeta>();
 let messages = new Map<string, StoredMessage[]>();
 let sendLog: SendLogEntry[] = [];
+let templates: MessageTemplate[] = [];
 
 function load() {
   try {
@@ -59,6 +68,7 @@ function load() {
     chats = new Map(Object.entries(parsed.chats || {}));
     messages = new Map(Object.entries(parsed.messages || {}));
     sendLog = parsed.sendLog || [];
+    templates = parsed.templates || [];
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error("[delivrou-notify] Impossible de charger l'historique sauvegarde:", err);
@@ -76,6 +86,7 @@ function scheduleSave() {
         chats: Object.fromEntries(chats),
         messages: Object.fromEntries(messages),
         sendLog,
+        templates,
       };
       fs.writeFileSync(DATA_FILE, JSON.stringify(shape), "utf8");
     } catch (err) {
@@ -134,4 +145,25 @@ export function addSendLogEntry(entry: Omit<SendLogEntry, "id" | "timestamp">) {
 
 export function listSendLog(limit = 100): SendLogEntry[] {
   return sendLog.slice(-limit).reverse();
+}
+
+export function listTemplates(): MessageTemplate[] {
+  return [...templates].sort((a, b) => a.name.localeCompare(b.name, "fr"));
+}
+
+export function addTemplate(name: string, body: string): MessageTemplate {
+  const full: MessageTemplate = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    body,
+    createdAt: Date.now(),
+  };
+  templates.push(full);
+  scheduleSave();
+  return full;
+}
+
+export function deleteTemplate(id: string) {
+  templates = templates.filter((t) => t.id !== id);
+  scheduleSave();
 }

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { whatsapp } from "./whatsapp-client.js";
 import { getSafetyStatus } from "./safety.js";
-import { listChats, getChat, getMessages, listSendLog } from "./store.js";
+import { listChats, getChat, getMessages, listSendLog, listTemplates, addTemplate, deleteTemplate } from "./store.js";
 import { sendWithGuards, queueLength } from "./send-queue.js";
 import {
   isDashboardConfigured,
@@ -25,70 +25,198 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#039;");
 }
 
-function layout(title: string, body: string, nav = true): string {
+function timeShort(ts: number): string {
+  return new Date(ts).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
+
+const ICONS = {
+  back: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 18l-6-6 6-6"/></svg>`,
+  search: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>`,
+  template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h16"/></svg>`,
+  chats: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`,
+  log: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>`,
+  plus: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>`,
+  send: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 11l18-8-8 18-2-8-8-2z"/></svg>`,
+  trash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m2 0-1 13a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1L6 7"/></svg>`,
+};
+
+/** Coquille HTML commune (tokens, styles) partagee par toutes les pages du tableau de bord. */
+function shell(title: string, bodyHtml: string): string {
   return `<!doctype html>
 <html lang="fr">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>${escapeHtml(title)} — delivrou-notify</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; background: #0b141a; color: #e9edef; }
-  header { background: #202c33; padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; }
-  header h1 { font-size: 16px; margin: 0; }
-  nav a { color: #8696a0; text-decoration: none; margin-left: 16px; font-size: 14px; }
-  nav a.active { color: #00a884; font-weight: 600; }
-  main { max-width: 900px; margin: 0 auto; padding: 20px; }
-  .card { background: #202c33; border-radius: 10px; padding: 16px 20px; margin-bottom: 16px; }
-  .stat-row { display: flex; gap: 16px; flex-wrap: wrap; }
-  .stat { background: #111b21; border-radius: 8px; padding: 12px 16px; flex: 1; min-width: 140px; }
-  .stat .label { color: #8696a0; font-size: 12px; text-transform: uppercase; }
-  .stat .value { font-size: 22px; font-weight: 700; margin-top: 4px; }
-  .ok { color: #00a884; }
-  .warn { color: #ffb648; }
-  .err { color: #f15c6d; }
-  table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #2a3942; }
-  th { color: #8696a0; font-weight: 600; font-size: 12px; text-transform: uppercase; }
-  a.chat-row { display: block; text-decoration: none; color: inherit; padding: 10px 0; border-bottom: 1px solid #2a3942; }
-  a.chat-row:hover { background: #111b21; }
-  .chat-name { font-weight: 600; }
-  .chat-last { color: #8696a0; font-size: 13px; margin-top: 2px; }
-  .bubble { max-width: 70%; padding: 8px 12px; border-radius: 10px; margin: 6px 0; font-size: 14px; line-height: 1.4; }
-  .bubble.in { background: #202c33; align-self: flex-start; }
-  .bubble.out { background: #005c4b; align-self: flex-end; margin-left: auto; }
-  .messages { display: flex; flex-direction: column; max-height: 60vh; overflow-y: auto; padding: 8px 0; }
-  form.compose { display: flex; gap: 8px; margin-top: 12px; }
-  input[type=text], input[type=password], textarea { background: #2a3942; border: none; border-radius: 8px; padding: 10px 12px; color: #e9edef; font-size: 14px; flex: 1; }
-  button { background: #00a884; border: none; border-radius: 8px; padding: 10px 18px; color: #fff; font-weight: 600; cursor: pointer; font-size: 14px; }
-  button:hover { background: #02926f; }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
-  .badge.sent { background: #0a3b2e; color: #00a884; }
-  .badge.failed { background: #3b1414; color: #f15c6d; }
-  .badge.blocked { background: #3b2d0a; color: #ffb648; }
-  .badge.auto { background: #1a2a33; color: #8696a0; }
-  .badge.manual { background: #1a2a33; color: #53bdeb; }
-  .login-box { max-width: 360px; margin: 80px auto; }
-  small.muted { color: #667781; }
+  :root {
+    --bg: #0c0b0a;
+    --header: #3a1a10;
+    --header-2: #4a2316;
+    --header-fg: #fbece3;
+    --surface: #1c1917;
+    --surface-2: #242019;
+    --border: #322c26;
+    --fg: #f6f1ea;
+    --fg-muted: #a89c8d;
+    --fg-faint: #786b5c;
+    --accent: #ff7a3d;
+    --accent-fg: #2a0f02;
+    --accent-wash: #3a2113;
+    --ok: #3fc98c;
+    --ok-wash: #113023;
+    --err: #ff6b5a;
+    --err-wash: #321713;
+    --warn: #ffbb4d;
+    --warn-wash: #332511;
+    --bubble-in: #221e1a;
+    --bubble-out: #4a2316;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  a { color: inherit; }
+  .app { max-width: 480px; margin: 0 auto; min-height: 100%; display: flex; flex-direction: column; position: relative; }
+
+  .topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: linear-gradient(165deg, var(--header-2), var(--header)); padding: 10px 14px 16px; }
+  .topbar-row { display: flex; align-items: center; gap: 10px; }
+  .topbar-mark { width: 30px; height: 30px; border-radius: 8px; background: rgba(0,0,0,.32); color: var(--header-fg); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px; flex: none; }
+  .topbar h1 { flex: 1; margin: 0; font-size: 18px; font-weight: 800; letter-spacing: -0.01em; color: var(--header-fg); }
+  .topbar-avatar { width: 30px; height: 30px; border-radius: 50%; background: rgba(0,0,0,.32); color: var(--header-fg); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 11px; flex: none; position: relative; text-decoration: none; }
+  .topbar-avatar::after { content: ""; position: absolute; right: -1px; bottom: -1px; width: 9px; height: 9px; border-radius: 50%; background: var(--ok); border: 2px solid var(--header); }
+  .topbar .back-btn { color: var(--header-fg); }
+  .search-row { display: flex; gap: 8px; margin-top: 12px; }
+  .search-pill { flex: 1; display: flex; align-items: center; gap: 8px; padding: 9px 13px; border-radius: 10px; background: rgba(255,255,255,.14); color: var(--header-fg); min-width: 0; border: none; }
+  .search-pill svg { width: 15px; height: 15px; opacity: .8; flex: none; }
+  .search-pill input { background: none; border: none; outline: none; color: var(--header-fg); font-size: 13.5px; width: 100%; }
+  .search-pill input::placeholder { color: rgba(251,236,227,.7); }
+  .filter-btn { width: 36px; height: 36px; border-radius: 10px; border: none; background: rgba(255,255,255,.14); color: var(--header-fg); display: flex; align-items: center; justify-content: center; flex: none; text-decoration: none; }
+  .filter-btn svg { width: 16px; height: 16px; }
+
+  .chip-row { display: flex; gap: 8px; padding: 12px 14px; overflow-x: auto; background: var(--bg); }
+  .chip-card { flex: none; min-width: 104px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 9px 11px; }
+  .chip-card .chip-icon { font-size: 15px; line-height: 1; }
+  .chip-card .label { font-size: 13.5px; font-weight: 700; margin-top: 6px; color: var(--fg); }
+  .chip-card .value { font-size: 11.5px; color: var(--fg-muted); margin-top: 1px; font-variant-numeric: tabular-nums; }
+  .chip-card.is-live { border-color: var(--accent); }
+
+  .section-label { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 6px; font-size: 13.5px; font-weight: 700; color: var(--fg); }
+
+  .list { flex: 1; overflow-y: auto; padding-bottom: 90px; }
+  .chat-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 16px; background: none; border: none; text-align: left; cursor: pointer; color: inherit; font: inherit; text-decoration: none; }
+  .chat-row:active { background: var(--surface); }
+  .avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; color: var(--accent-fg); background: var(--accent); flex: none; }
+  .avatar.group { background: var(--fg-muted); color: var(--bg); }
+  .chat-main { flex: 1; min-width: 0; }
+  .chat-top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .chat-name { font-weight: 700; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chat-time { font-size: 11px; color: var(--fg-faint); flex: none; font-variant-numeric: tabular-nums; }
+  .chat-preview { font-size: 13px; color: var(--fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .chat-preview b { color: var(--fg); font-weight: 600; }
+  .empty { padding: 48px 24px; text-align: center; color: var(--fg-muted); font-size: 14px; }
+
+  .fab { position: fixed; right: 20px; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); width: 52px; height: 52px; border-radius: 50%; background: var(--accent); color: var(--accent-fg); border: none; display: flex; align-items: center; justify-content: center; box-shadow: 0 6px 18px rgba(255,122,61,.35); cursor: pointer; z-index: 6; text-decoration: none; }
+  .fab svg { width: 22px; height: 22px; }
+  .fab-wrap { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+  .composer { display: flex; gap: 8px; padding: 10px 12px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); background: var(--surface); border-top: 1px solid var(--border); }
+  .composer input[type=text] { flex: 1; border: 1px solid var(--border); background: var(--surface-2); border-radius: 20px; padding: 10px 14px; font-size: 14px; color: var(--fg); min-width: 0; }
+  .composer input::placeholder { color: var(--fg-faint); }
+  .composer input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .send-btn { width: 38px; height: 38px; border-radius: 50%; border: none; background: var(--accent); color: var(--accent-fg); cursor: pointer; flex: none; display: flex; align-items: center; justify-content: center; }
+  .send-btn svg { width: 15px; height: 15px; }
+
+  .chat-header { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 6px; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .back-btn { border: none; background: none; color: var(--fg); cursor: pointer; padding: 6px; flex: none; display: flex; }
+  .back-btn svg { width: 20px; height: 20px; }
+  .chat-header .avatar { width: 32px; height: 32px; font-size: 12px; flex: none; }
+  .chat-header-id { flex: 1; min-width: 0; }
+  .chat-header-name { font-weight: 700; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chat-header-sub { font-size: 11.5px; color: var(--fg-muted); }
+
+  .messages { flex: 1; overflow-y: auto; padding: 14px 12px; display: flex; flex-direction: column; gap: 2px; background: var(--bg); }
+  .day-sep { align-self: center; font-size: 11px; color: var(--fg-faint); background: var(--surface); padding: 3px 10px; border-radius: 999px; margin: 10px 0; }
+  .bubble-row { display: flex; }
+  .bubble-row.out { justify-content: flex-end; }
+  .bubble { max-width: 78%; padding: 8px 11px 7px; border-radius: 14px; font-size: 14px; line-height: 1.38; margin: 3px 0; white-space: pre-wrap; word-break: break-word; }
+  .bubble.in { background: var(--bubble-in); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+  .bubble.out { background: var(--bubble-out); border-bottom-right-radius: 4px; }
+  .bubble .time { display: block; font-size: 10px; color: var(--fg-faint); margin-top: 3px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  .filters { display: flex; gap: 6px; padding: 10px 14px; overflow-x: auto; background: var(--bg); }
+  .filter-pill { flex: none; font-size: 12.5px; font-weight: 700; padding: 6px 13px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--fg-muted); cursor: pointer; text-decoration: none; }
+  .filter-pill.is-active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+
+  .log-list { flex: 1; overflow-y: auto; padding: 4px 0 90px; }
+  .log-day-label { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-faint); padding: 14px 16px 6px; }
+  .log-item { display: flex; gap: 12px; align-items: flex-start; padding: 10px 16px; }
+  .log-icon { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; flex: none; margin-top: 1px; }
+  .log-icon.sent { background: var(--ok-wash); color: var(--ok); }
+  .log-icon.failed { background: var(--err-wash); color: var(--err); }
+  .log-icon.blocked { background: var(--warn-wash); color: var(--warn); }
+  .log-main { flex: 1; min-width: 0; }
+  .log-top { display: flex; justify-content: space-between; gap: 8px; }
+  .log-phone { font-weight: 700; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .log-time { font-size: 11.5px; color: var(--fg-faint); flex: none; font-variant-numeric: tabular-nums; }
+  .log-text { font-size: 13px; color: var(--fg-muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
+  .log-badges { display: flex; gap: 6px; margin-top: 6px; }
+  .badge { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+  .badge.sent { background: var(--ok-wash); color: var(--ok); }
+  .badge.failed { background: var(--err-wash); color: var(--err); }
+  .badge.blocked { background: var(--warn-wash); color: var(--warn); }
+  .badge.auto { background: var(--surface-2); color: var(--fg-muted); border: 1px solid var(--border); }
+  .badge.manual { background: var(--accent-wash); color: var(--accent); }
+  .log-reason { font-size: 12px; color: var(--err); margin-top: 4px; }
+
+  .tabbar { position: sticky; bottom: 0; display: flex; background: var(--surface); border-top: 1px solid var(--border); padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px)); }
+  .tab { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; background: none; border: none; color: var(--fg-faint); font-size: 11px; font-weight: 600; padding: 6px 0; cursor: pointer; position: relative; text-decoration: none; }
+  .tab.is-active { color: var(--fg); }
+  .tab.is-active svg { color: var(--accent); }
+  .tab svg { width: 22px; height: 22px; }
+  .tab .tab-dot { position: absolute; top: 2px; right: calc(50% - 16px); width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+
+  .login-wrap { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 32px 28px calc(32px + env(safe-area-inset-bottom, 0px)); gap: 22px; }
+  .login-mark { width: 52px; height: 52px; border-radius: 14px; background: linear-gradient(165deg, var(--header-2), var(--header)); color: var(--header-fg); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 20px; }
+  .login-title { font-size: 21px; font-weight: 800; margin: 0; }
+  .login-sub { font-size: 13.5px; color: var(--fg-muted); margin-top: 4px; }
+  .field-label { font-size: 12.5px; font-weight: 600; color: var(--fg-muted); margin-bottom: 6px; display: block; }
+  .text-input { width: 100%; padding: 13px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--fg); font-size: 15px; }
+  .text-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .primary-btn { width: 100%; padding: 13px; border-radius: 10px; border: none; background: var(--accent); color: var(--accent-fg); font-size: 15px; font-weight: 800; cursor: pointer; }
+  .login-foot { font-size: 12px; color: var(--fg-faint); text-align: center; }
+
+  .page-pad { padding: 14px 16px calc(90px + env(safe-area-inset-bottom, 0px)); }
+  .err-banner { background: var(--err-wash); color: var(--err); padding: 10px 14px; border-radius: 10px; font-size: 13.5px; margin-bottom: 12px; }
+  .template-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
+  .template-name { font-weight: 700; font-size: 14px; }
+  .template-body { font-size: 13px; color: var(--fg-muted); margin-top: 4px; white-space: pre-wrap; }
+  .template-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .ghost-btn { background: var(--surface-2); border: 1px solid var(--border); color: var(--fg-muted); border-radius: 8px; padding: 7px 11px; font-size: 12.5px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 5px; }
+  .ghost-btn svg { width: 13px; height: 13px; }
+  textarea.text-input { resize: vertical; min-height: 80px; font-family: inherit; }
 </style>
 </head>
 <body>
-${
-  nav
-    ? `<header>
-  <h1>delivrou-notify</h1>
-  <nav>
-    <a href="/dashboard">Conversations</a>
-    <a href="/dashboard/logs">Journal</a>
-    <a href="/dashboard/logout">Deconnexion</a>
-  </nav>
-</header>`
-    : ""
-}
-<main>${body}</main>
+<div class="app">
+${bodyHtml}
+</div>
 </body>
 </html>`;
+}
+
+function tabbar(active: "chats" | "logs"): string {
+  return `<div class="tabbar">
+    <a class="tab ${active === "chats" ? "is-active" : ""}" href="/dashboard">${active === "chats" ? '<span class="tab-dot"></span>' : ""}${ICONS.chats}Conversations</a>
+    <a class="tab ${active === "logs" ? "is-active" : ""}" href="/dashboard/logs">${active === "logs" ? '<span class="tab-dot"></span>' : ""}${ICONS.log}Journal</a>
+  </div>`;
 }
 
 dashboardRouter.get("/login", (req, res) => {
@@ -98,19 +226,24 @@ dashboardRouter.get("/login", (req, res) => {
       .send("Tableau de bord non configure : definissez DASHBOARD_PASSWORD dans les variables d'environnement.");
     return;
   }
-  const error = req.query.error ? "<p class='err'>Mot de passe incorrect.</p>" : "";
+  const error = req.query.error ? `<div class="err-banner">Mot de passe incorrect.</div>` : "";
   res.send(
-    layout(
+    shell(
       "Connexion",
-      `<div class="card login-box">
-        <h2>Connexion</h2>
+      `<div class="login-wrap">
+        <div class="login-mark">DN</div>
+        <div>
+          <h1 class="login-title">delivrou-notify</h1>
+          <p class="login-sub">Entrez le mot de passe pour acceder aux conversations et au journal d'envoi.</p>
+        </div>
         ${error}
         <form method="post" action="/dashboard/login">
-          <input type="password" name="password" placeholder="Mot de passe" autofocus style="width:100%;box-sizing:border-box;margin-bottom:10px" />
-          <button type="submit" style="width:100%">Entrer</button>
+          <label class="field-label" for="password">Mot de passe</label>
+          <input class="text-input" type="password" id="password" name="password" placeholder="••••••••" autofocus style="margin-bottom:14px" />
+          <button class="primary-btn" type="submit">Entrer</button>
         </form>
+        <p class="login-foot">notify.delivrou.com</p>
       </div>`,
-      false,
     ),
   );
 });
@@ -134,48 +267,99 @@ dashboardRouter.get("/logout", (req, res) => {
 
 dashboardRouter.use(requireDashboardAuth);
 
-dashboardRouter.get("/", (_req, res) => {
+dashboardRouter.get("/", (req, res) => {
   const safety = getSafetyStatus();
   const connected = whatsapp.isConnected();
-  const chats = listChats(50);
+  const q = String(req.query.q || "").trim().toLowerCase();
+  let chats = listChats(100);
+  if (q) chats = chats.filter((c) => c.name.toLowerCase().includes(q));
 
-  const statCards = `
-    <div class="stat-row">
-      <div class="stat"><div class="label">WhatsApp</div><div class="value ${connected ? "ok" : "err"}">${connected ? "Connecte" : "Deconnecte"}</div></div>
-      <div class="stat"><div class="label">Envoyes aujourd'hui</div><div class="value">${safety.sentToday} / ${safety.maxPerDay}</div></div>
-      <div class="stat"><div class="label">Cette minute</div><div class="value">${safety.sentLastMinute} / ${safety.maxPerMinute}</div></div>
-      <div class="stat"><div class="label">File d'attente</div><div class="value">${queueLength()}</div></div>
-      ${safety.circuitOpen ? `<div class="stat"><div class="label">Protection active</div><div class="value warn">Envois suspendus</div></div>` : ""}
-    </div>`;
-
-  const chatList =
-    chats.length === 0
-      ? `<p><small class="muted">Aucune conversation enregistree pour le moment. Elles apparaissent au fur et a mesure que des messages sont recus ou envoyes depuis le demarrage du service.</small></p>`
-      : chats
-          .map(
-            (c) => `<a class="chat-row" href="/dashboard/chat/${encodeURIComponent(c.jid)}">
-        <div class="chat-name">${escapeHtml(c.name)}${c.isGroup ? " (groupe)" : ""}</div>
-        <div class="chat-last">${escapeHtml((c.lastText || "").slice(0, 80))}</div>
+  const chatRows = chats.length
+    ? chats
+        .map(
+          (c) => `<a class="chat-row" href="/dashboard/chat/${encodeURIComponent(c.jid)}">
+        <div class="avatar ${c.isGroup ? "group" : ""}">${escapeHtml(initials(c.name))}</div>
+        <div class="chat-main">
+          <div class="chat-top">
+            <span class="chat-name">${escapeHtml(c.name)}</span>
+            <span class="chat-time">${c.lastTimestamp ? timeShort(c.lastTimestamp) : ""}</span>
+          </div>
+          <div class="chat-preview">${escapeHtml((c.lastText || "").slice(0, 90))}</div>
+        </div>
       </a>`,
-          )
-          .join("");
+        )
+        .join("")
+    : `<div class="empty">${q ? "Aucune conversation ne correspond a votre recherche." : "Aucune conversation enregistree pour le moment. Elles apparaissent au fur et a mesure des messages recus ou envoyes depuis le demarrage du service."}</div>`;
 
   res.send(
-    layout(
+    shell(
       "Conversations",
-      `<div class="card">${statCards}</div>
-       <div class="card">
-         <h2>Conversations</h2>
-         ${chatList}
-       </div>
-       <div class="card">
-         <h2>Envoyer un message manuel</h2>
-         <form class="compose" method="post" action="/dashboard/send">
-           <input type="text" name="phone" placeholder="Numero (ex: 224612345678)" required />
-           <input type="text" name="text" placeholder="Message" required style="flex:2" />
-           <button type="submit">Envoyer</button>
-         </form>
-       </div>`,
+      `<div class="fab-wrap">
+        <div class="topbar">
+          <div class="topbar-row">
+            <div class="topbar-mark">DN</div>
+            <h1>Delivrou Notify</h1>
+            <a class="topbar-avatar" href="/dashboard/templates">A</a>
+          </div>
+          <form class="search-row" method="get" action="/dashboard">
+            <label class="search-pill">
+              ${ICONS.search}
+              <input type="text" name="q" value="${escapeHtml(q)}" placeholder="Rechercher une conversation..." />
+            </label>
+            <a class="filter-btn" href="/dashboard/templates" aria-label="Modeles de message">${ICONS.template}</a>
+          </form>
+        </div>
+
+        <div class="chip-row">
+          <div class="chip-card is-live"><div class="chip-icon">${connected ? "🟢" : "🔴"}</div><div class="label">WhatsApp</div><div class="value">${connected ? "Connecté" : "Déconnecté"}</div></div>
+          <div class="chip-card"><div class="chip-icon">📨</div><div class="label">${safety.sentToday} / ${safety.maxPerDay}</div><div class="value">Envoyés aujourd'hui</div></div>
+          <div class="chip-card"><div class="chip-icon">⏱️</div><div class="label">${safety.sentLastMinute} / ${safety.maxPerMinute}</div><div class="value">Cette minute</div></div>
+          <div class="chip-card"><div class="chip-icon">📥</div><div class="label">${queueLength()}</div><div class="value">File d'attente</div></div>
+          ${safety.circuitOpen ? `<div class="chip-card" style="border-color:var(--err)"><div class="chip-icon">⚠️</div><div class="label">Suspendu</div><div class="value">Protection active</div></div>` : ""}
+        </div>
+
+        <div class="list">
+          <div class="section-label">Conversations</div>
+          ${chatRows}
+        </div>
+
+        <a class="fab" href="/dashboard/compose" aria-label="Nouveau message">${ICONS.plus}</a>
+      </div>
+      ${tabbar("chats")}`,
+    ),
+  );
+});
+
+dashboardRouter.get("/compose", (_req, res) => {
+  const templates = listTemplates();
+  res.send(
+    shell(
+      "Nouveau message",
+      `<div class="chat-header">
+        <a class="back-btn" href="/dashboard" aria-label="Retour">${ICONS.back}</a>
+        <div class="chat-header-id"><div class="chat-header-name">Nouveau message</div></div>
+      </div>
+      <div class="page-pad">
+        <form method="post" action="/dashboard/send">
+          <label class="field-label" for="phone">Numero (avec indicatif pays, chiffres uniquement)</label>
+          <input class="text-input" type="text" id="phone" name="phone" placeholder="224612345678" required style="margin-bottom:14px" />
+
+          ${
+            templates.length
+              ? `<label class="field-label" for="tpl">Partir d'un modele (optionnel)</label>
+                 <select class="text-input" id="tpl" style="margin-bottom:14px" onchange="document.getElementById('text').value=this.value">
+                   <option value="">— Aucun —</option>
+                   ${templates.map((t) => `<option value="${escapeHtml(t.body)}">${escapeHtml(t.name)}</option>`).join("")}
+                 </select>`
+              : ""
+          }
+
+          <label class="field-label" for="text">Message</label>
+          <textarea class="text-input" id="text" name="text" rows="4" required style="margin-bottom:14px"></textarea>
+
+          <button class="primary-btn" type="submit">Envoyer</button>
+        </form>
+      </div>`,
     ),
   );
 });
@@ -184,27 +368,37 @@ dashboardRouter.get("/chat/:jid", (req, res) => {
   const jid = req.params.jid;
   const chat = getChat(jid);
   const msgs = getMessages(jid, 150);
+  const name = chat?.name || jid;
 
+  let lastDay = "";
   const bubbles = msgs
-    .map(
-      (m) =>
-        `<div class="bubble ${m.fromMe ? "out" : "in"}">${escapeHtml(m.text)}<br/><small class="muted">${new Date(m.timestamp).toLocaleString("fr-FR")}</small></div>`,
-    )
+    .map((m) => {
+      const day = new Date(m.timestamp).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+      const sep = day !== lastDay ? `<div class="day-sep">${escapeHtml(day)}</div>` : "";
+      lastDay = day;
+      return `${sep}<div class="bubble-row ${m.fromMe ? "out" : "in"}"><div class="bubble ${m.fromMe ? "out" : "in"}">${escapeHtml(m.text)}<span class="time">${timeShort(m.timestamp)}</span></div></div>`;
+    })
     .join("");
 
   res.send(
-    layout(
-      chat?.name || jid,
-      `<p><a href="/dashboard" style="color:#8696a0">&larr; Retour</a></p>
-       <div class="card">
-         <h2>${escapeHtml(chat?.name || jid)}</h2>
-         <div class="messages">${bubbles || "<p><small class='muted'>Aucun message enregistre pour cette conversation.</small></p>"}</div>
-         <form class="compose" method="post" action="/dashboard/send">
-           <input type="hidden" name="jid" value="${escapeHtml(jid)}" />
-           <input type="text" name="text" placeholder="Repondre..." required />
-           <button type="submit">Envoyer</button>
-         </form>
-       </div>`,
+    shell(
+      name,
+      `<div class="chat-header">
+        <a class="back-btn" href="/dashboard" aria-label="Retour">${ICONS.back}</a>
+        <div class="avatar ${chat?.isGroup ? "group" : ""}">${escapeHtml(initials(name))}</div>
+        <div class="chat-header-id">
+          <div class="chat-header-name">${escapeHtml(name)}</div>
+          <div class="chat-header-sub">${escapeHtml(jid.split("@")[0])}</div>
+        </div>
+      </div>
+      <div class="messages">
+        ${bubbles || `<div class="empty">Aucun message enregistre pour cette conversation.</div>`}
+      </div>
+      <form class="composer" method="post" action="/dashboard/send">
+        <input type="hidden" name="jid" value="${escapeHtml(jid)}" />
+        <input type="text" name="text" placeholder="Répondre..." required />
+        <button class="send-btn" type="submit" aria-label="Envoyer">${ICONS.send}</button>
+      </form>`,
     ),
   );
 });
@@ -214,9 +408,7 @@ dashboardRouter.post("/send", async (req, res) => {
   let phone = String(req.body?.phone || "").replace(/\D/g, "");
   const jid = String(req.body?.jid || "");
 
-  if (!phone && jid) {
-    phone = jid.split("@")[0];
-  }
+  if (!phone && jid) phone = jid.split("@")[0];
 
   if (!phone || !text) {
     res.redirect(jid ? `/dashboard/chat/${encodeURIComponent(jid)}` : "/dashboard");
@@ -227,31 +419,116 @@ dashboardRouter.post("/send", async (req, res) => {
   res.redirect(jid ? `/dashboard/chat/${encodeURIComponent(jid)}` : "/dashboard");
 });
 
-dashboardRouter.get("/logs", (_req, res) => {
-  const log = listSendLog(200);
+dashboardRouter.get("/logs", (req, res) => {
+  const filter = String(req.query.filter || "all");
+  let log = listSendLog(500);
+  if (filter === "sent") log = log.filter((e) => e.status === "sent");
+  else if (filter === "failed") log = log.filter((e) => e.status === "failed");
+  else if (filter === "blocked") log = log.filter((e) => e.status === "blocked");
+  else if (filter === "manual") log = log.filter((e) => e.source === "manual");
+  log = log.slice(0, 200);
+
+  let lastDay = "";
   const rows = log
-    .map(
-      (e) => `<tr>
-        <td>${new Date(e.timestamp).toLocaleString("fr-FR")}</td>
-        <td>${escapeHtml(e.phone)}</td>
-        <td>${escapeHtml(e.text.slice(0, 60))}</td>
-        <td><span class="badge ${e.source}">${e.source === "auto" ? "Auto" : "Manuel"}</span></td>
-        <td><span class="badge ${e.status}">${e.status === "sent" ? "Envoye" : e.status === "failed" ? "Echec" : "Bloque"}</span></td>
-        <td><small class="muted">${escapeHtml(e.error || "")}</small></td>
-      </tr>`,
-    )
+    .map((e) => {
+      const day = new Date(e.timestamp).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+      const label = day !== lastDay ? `<div class="log-day-label">${escapeHtml(day)}</div>` : "";
+      lastDay = day;
+      const icon = e.status === "sent" ? "✓" : e.status === "failed" ? "!" : "⏱";
+      const statusLabel = e.status === "sent" ? "Envoyé" : e.status === "failed" ? "Échec" : "Bloqué";
+      return `${label}<div class="log-item">
+        <div class="log-icon ${e.status}">${icon}</div>
+        <div class="log-main">
+          <div class="log-top"><span class="log-phone">${escapeHtml(e.phone)}</span><span class="log-time">${timeShort(e.timestamp)}</span></div>
+          <div class="log-text">${escapeHtml(e.text.slice(0, 90))}</div>
+          <div class="log-badges">
+            <span class="badge ${e.status}">${statusLabel}</span>
+            <span class="badge ${e.source}">${e.source === "auto" ? "Auto" : "Manuel"}</span>
+          </div>
+          ${e.error ? `<div class="log-reason">${escapeHtml(e.error)}</div>` : ""}
+        </div>
+      </div>`;
+    })
     .join("");
 
+  const filters: Array<[string, string]> = [
+    ["all", "Tout"],
+    ["sent", "Envoyés"],
+    ["failed", "Échecs"],
+    ["blocked", "Bloqués"],
+    ["manual", "Manuel"],
+  ];
+
   res.send(
-    layout(
+    shell(
       "Journal",
-      `<div class="card">
-        <h2>Journal des envois (200 derniers)</h2>
-        <table>
-          <thead><tr><th>Date</th><th>Numero</th><th>Message</th><th>Source</th><th>Statut</th><th>Detail</th></tr></thead>
-          <tbody>${rows || "<tr><td colspan='6'><small class='muted'>Aucun envoi pour le moment.</small></td></tr>"}</tbody>
-        </table>
+      `<div class="topbar" style="padding-bottom:14px">
+        <div class="topbar-row">
+          <a class="back-btn" href="/dashboard" aria-label="Retour" style="margin-right:-4px">${ICONS.back}</a>
+          <h1>Journal</h1>
+          <a class="topbar-avatar" href="/dashboard/templates">A</a>
+        </div>
+      </div>
+      <div class="filters">
+        ${filters.map(([key, label]) => `<a class="filter-pill ${filter === key ? "is-active" : ""}" href="/dashboard/logs?filter=${key}">${label}</a>`).join("")}
+      </div>
+      <div class="log-list">
+        ${rows || `<div class="empty">Aucun envoi pour ce filtre.</div>`}
+      </div>
+      ${tabbar("logs")}`,
+    ),
+  );
+});
+
+dashboardRouter.get("/templates", (_req, res) => {
+  const templates = listTemplates();
+  res.send(
+    shell(
+      "Modèles de message",
+      `<div class="chat-header">
+        <a class="back-btn" href="/dashboard" aria-label="Retour">${ICONS.back}</a>
+        <div class="chat-header-id"><div class="chat-header-name">Modèles de message</div></div>
+      </div>
+      <div class="page-pad">
+        ${
+          templates.length
+            ? templates
+                .map(
+                  (t) => `<div class="template-card">
+                  <div class="template-name">${escapeHtml(t.name)}</div>
+                  <div class="template-body">${escapeHtml(t.body)}</div>
+                  <div class="template-actions">
+                    <form method="post" action="/dashboard/templates/${t.id}/delete" onsubmit="return true">
+                      <button class="ghost-btn" type="submit">${ICONS.trash} Supprimer</button>
+                    </form>
+                  </div>
+                </div>`,
+                )
+                .join("")
+            : `<div class="empty">Aucun modèle pour le moment. Créez-en un ci-dessous pour gagner du temps sur vos messages manuels (relances, réponses fréquentes...).</div>`
+        }
+
+        <h2 style="font-size:15px;margin:20px 0 10px">Nouveau modèle</h2>
+        <form method="post" action="/dashboard/templates">
+          <label class="field-label" for="name">Nom</label>
+          <input class="text-input" type="text" id="name" name="name" placeholder="Ex: Relance panier abandonné" required style="margin-bottom:14px" />
+          <label class="field-label" for="body">Message</label>
+          <textarea class="text-input" id="body" name="body" rows="4" required style="margin-bottom:14px"></textarea>
+          <button class="primary-btn" type="submit">Enregistrer le modèle</button>
+        </form>
       </div>`,
     ),
   );
+});
+
+dashboardRouter.post("/templates", (req, res) => {
+  const name = String(req.body?.name || "").trim();
+  const body = String(req.body?.body || "").trim();
+  if (name && body) addTemplate(name, body);
+  res.redirect("/dashboard/templates");
+});
+
+dashboardRouter.post("/templates/:id/delete", (req, res) => {
+  deleteTemplate(req.params.id);
+  res.redirect("/dashboard/templates");
 });

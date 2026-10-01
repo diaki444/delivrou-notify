@@ -1,0 +1,697 @@
+<title>Delivrou Notify</title>
+<style>
+  /* Layout concept: Slack-mobile structure — deep-toned header with
+     workspace mark + avatar, floating search pill, a row of dark stat
+     cards tucked under the header, list rows with pill badges, and an
+     accent FAB for composing — rebuilt dark-first with Delivrou's colors. */
+  :root {
+    --bg: #0c0b0a;
+    --header: #3a1a10;
+    --header-2: #4a2316;
+    --header-fg: #fbece3;
+    --surface: #1c1917;
+    --surface-2: #242019;
+    --border: #322c26;
+    --fg: #f6f1ea;
+    --fg-muted: #a89c8d;
+    --fg-faint: #786b5c;
+    --accent: #ff7a3d;
+    --accent-fg: #2a0f02;
+    --accent-wash: #3a2113;
+    --ok: #3fc98c;
+    --ok-wash: #113023;
+    --err: #ff6b5a;
+    --err-wash: #321713;
+    --warn: #ffbb4d;
+    --warn-wash: #332511;
+    --bubble-in: #221e1a;
+    --bubble-out: #4a2316;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .app {
+    max-width: 440px;
+    margin: 0 auto;
+    min-height: 100%;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+
+  /* --- demo-only switcher, not part of the real product --- */
+  .demo-bar {
+    display: flex;
+    gap: 6px;
+    padding: 10px 14px;
+    background: var(--surface-2);
+    border-bottom: 1px dashed var(--border);
+    overflow-x: auto;
+  }
+  .demo-bar button {
+    flex: none;
+    font-size: 12px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--fg-muted);
+    cursor: pointer;
+  }
+  .demo-bar button.is-active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+
+  .screen { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .screen[hidden] { display: none; }
+
+  /* --- header block (Slack-style: deep gradient, mark, title, avatar) --- */
+  .topbar {
+    position: sticky;
+    top: env(safe-area-inset-top, 0px);
+    z-index: 5;
+    background: linear-gradient(165deg, var(--header-2), var(--header));
+    padding: 10px 14px 16px;
+  }
+  .topbar-row { display: flex; align-items: center; gap: 10px; }
+  .topbar-mark {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.32);
+    color: var(--header-fg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 12px;
+    flex: none;
+  }
+  .topbar h1 { flex: 1; margin: 0; font-size: 18px; font-weight: 800; letter-spacing: -0.01em; color: var(--header-fg); }
+  .topbar-avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.32);
+    color: var(--header-fg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 11px;
+    flex: none;
+    position: relative;
+  }
+  .topbar-avatar::after {
+    content: "";
+    position: absolute;
+    right: -1px;
+    bottom: -1px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--ok);
+    border: 2px solid var(--header);
+  }
+  .search-row { display: flex; gap: 8px; margin-top: 12px; }
+  .search-pill {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 13px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.14);
+    color: var(--header-fg);
+    min-width: 0;
+  }
+  .search-pill svg { width: 15px; height: 15px; opacity: 0.8; flex: none; }
+  .search-pill span { font-size: 13.5px; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .filter-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    border: none;
+    background: rgba(255, 255, 255, 0.14);
+    color: var(--header-fg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+  }
+  .filter-btn svg { width: 16px; height: 16px; }
+
+  /* --- chip row, tucked just under the header --- */
+  .chip-row {
+    display: flex;
+    gap: 8px;
+    padding: 12px 14px;
+    overflow-x: auto;
+    background: var(--bg);
+  }
+  .chip-card {
+    flex: none;
+    min-width: 104px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 9px 11px;
+  }
+  .chip-card .chip-icon { font-size: 15px; line-height: 1; }
+  .chip-card .label { font-size: 13.5px; font-weight: 700; margin-top: 6px; color: var(--fg); }
+  .chip-card .value { font-size: 11.5px; color: var(--fg-muted); margin-top: 1px; font-variant-numeric: tabular-nums; }
+  .chip-card.is-live { border-color: var(--accent); }
+
+  /* --- section list --- */
+  .section-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px 6px;
+    font-size: 13.5px;
+    font-weight: 700;
+    color: var(--fg);
+  }
+  .section-label svg { width: 14px; height: 14px; color: var(--fg-faint); }
+
+  .list { flex: 1; overflow-y: auto; padding-bottom: 90px; }
+  .chat-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 10px 16px;
+    background: none;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+  }
+  .chat-row:active { background: var(--surface); }
+  .avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--accent-fg);
+    background: var(--accent);
+    flex: none;
+  }
+  .avatar.group { background: var(--fg-muted); color: var(--bg); }
+  .chat-main { flex: 1; min-width: 0; }
+  .chat-top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .chat-name { font-weight: 700; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chat-time { font-size: 11px; color: var(--fg-faint); flex: none; font-variant-numeric: tabular-nums; }
+  .chat-preview {
+    font-size: 13px;
+    color: var(--fg-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+  }
+  .chat-preview b { color: var(--fg); font-weight: 600; }
+  .pill-badge {
+    flex: none;
+    min-width: 19px;
+    height: 19px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--accent-fg);
+    font-size: 11px;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .pill-badge.ghost { background: var(--ok-wash); color: var(--ok); }
+
+  .empty { padding: 48px 24px; text-align: center; color: var(--fg-muted); font-size: 14px; }
+
+  /* --- floating action button (compose) --- */
+  .fab {
+    position: fixed;
+    right: 20px;
+    bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--accent-fg);
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 6px 18px rgba(255, 122, 61, 0.35);
+    cursor: pointer;
+    z-index: 6;
+  }
+  .fab svg { width: 22px; height: 22px; }
+  .fab-wrap { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+  /* --- composer (shared) --- */
+  .composer {
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+  }
+  .composer input[type="text"] {
+    flex: 1;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    border-radius: 20px;
+    padding: 10px 14px;
+    font-size: 14px;
+    color: var(--fg);
+    min-width: 0;
+  }
+  .composer input[type="text"]::placeholder { color: var(--fg-faint); }
+  .composer input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .send-btn {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: none;
+    background: var(--accent);
+    color: var(--accent-fg);
+    font-size: 16px;
+    cursor: pointer;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .send-btn:active { transform: scale(0.94); }
+
+  /* --- chat detail --- */
+  .chat-header {
+    position: sticky;
+    top: env(safe-area-inset-top, 0px);
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 10px 10px 6px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .back-btn { border: none; background: none; color: var(--fg); font-size: 20px; cursor: pointer; padding: 4px; flex: none; }
+  .chat-header .avatar { width: 32px; height: 32px; font-size: 12px; flex: none; }
+  .chat-header-id { flex: 1; min-width: 0; }
+  .chat-header-name { font-weight: 700; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chat-header-sub { font-size: 11.5px; color: var(--fg-muted); }
+  .icon-btn {
+    width: 32px; height: 32px; border-radius: 8px; border: none;
+    background: var(--surface-2); color: var(--fg-muted);
+    display: flex; align-items: center; justify-content: center; cursor: pointer; flex: none;
+  }
+  .icon-btn svg { width: 16px; height: 16px; }
+
+  .messages { flex: 1; overflow-y: auto; padding: 14px 12px; display: flex; flex-direction: column; gap: 2px; background: var(--bg); }
+  .day-sep { align-self: center; font-size: 11px; color: var(--fg-faint); background: var(--surface); padding: 3px 10px; border-radius: 999px; margin: 10px 0; }
+  .bubble-row { display: flex; }
+  .bubble-row.out { justify-content: flex-end; }
+  .bubble { max-width: 78%; padding: 8px 11px 7px; border-radius: 14px; font-size: 14px; line-height: 1.38; margin: 3px 0; }
+  .bubble.in { background: var(--bubble-in); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+  .bubble.out { background: var(--bubble-out); border-bottom-right-radius: 4px; }
+  .bubble .time { display: block; font-size: 10px; color: var(--fg-faint); margin-top: 3px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* --- log screen --- */
+  .filters { display: flex; gap: 6px; padding: 10px 14px; overflow-x: auto; background: var(--bg); }
+  .filter-pill { flex: none; font-size: 12.5px; font-weight: 700; padding: 6px 13px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--fg-muted); cursor: pointer; }
+  .filter-pill.is-active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+
+  .log-list { flex: 1; overflow-y: auto; padding: 4px 0 90px; }
+  .log-day-label { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-faint); padding: 14px 16px 6px; }
+  .log-item { display: flex; gap: 12px; align-items: flex-start; padding: 10px 16px; }
+  .log-icon { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; flex: none; margin-top: 1px; }
+  .log-icon.sent { background: var(--ok-wash); color: var(--ok); }
+  .log-icon.failed { background: var(--err-wash); color: var(--err); }
+  .log-icon.blocked { background: var(--warn-wash); color: var(--warn); }
+  .log-main { flex: 1; min-width: 0; }
+  .log-top { display: flex; justify-content: space-between; gap: 8px; }
+  .log-phone { font-weight: 700; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .log-time { font-size: 11.5px; color: var(--fg-faint); flex: none; font-variant-numeric: tabular-nums; }
+  .log-text { font-size: 13px; color: var(--fg-muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
+  .log-badges { display: flex; gap: 6px; margin-top: 6px; }
+  .badge { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+  .badge.sent { background: var(--ok-wash); color: var(--ok); }
+  .badge.failed { background: var(--err-wash); color: var(--err); }
+  .badge.blocked { background: var(--warn-wash); color: var(--warn); }
+  .badge.auto { background: var(--surface-2); color: var(--fg-muted); border: 1px solid var(--border); }
+  .badge.manual { background: var(--accent-wash); color: var(--accent); }
+  .log-reason { font-size: 12px; color: var(--err); margin-top: 4px; }
+
+  /* --- bottom nav --- */
+  .tabbar {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+  .tab { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; background: none; border: none; color: var(--fg-faint); font-size: 11px; font-weight: 600; padding: 6px 0; cursor: pointer; position: relative; }
+  .tab.is-active { color: var(--fg); }
+  .tab.is-active svg { color: var(--accent); }
+  .tab svg { width: 22px; height: 22px; }
+  .tab .tab-dot { position: absolute; top: 2px; right: calc(50% - 16px); width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+
+  /* --- login screen --- */
+  .login-wrap { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 32px 28px calc(32px + env(safe-area-inset-bottom, 0px)); gap: 22px; background: var(--bg); }
+  .login-mark { width: 52px; height: 52px; border-radius: 14px; background: linear-gradient(165deg, var(--header-2), var(--header)); color: var(--header-fg); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 20px; }
+  .login-title { font-size: 21px; font-weight: 800; margin: 0; color: var(--fg); }
+  .login-sub { font-size: 13.5px; color: var(--fg-muted); margin-top: 4px; }
+  .field-label { font-size: 12.5px; font-weight: 600; color: var(--fg-muted); margin-bottom: 6px; display: block; }
+  .login-input { width: 100%; padding: 13px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--fg); font-size: 15px; }
+  .login-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .login-btn { width: 100%; padding: 13px; border-radius: 10px; border: none; background: var(--accent); color: var(--accent-fg); font-size: 15px; font-weight: 800; cursor: pointer; }
+  .login-btn:active { opacity: 0.9; }
+  .login-foot { font-size: 12px; color: var(--fg-faint); text-align: center; }
+</style>
+
+<div class="app">
+  <div class="demo-bar" role="tablist" aria-label="Apercu des ecrans (demo)">
+    <button type="button" data-demo="login" class="is-active">Connexion</button>
+    <button type="button" data-demo="list">Conversations</button>
+    <button type="button" data-demo="chat">Conversation</button>
+    <button type="button" data-demo="log">Journal</button>
+  </div>
+
+  <!-- LOGIN -->
+  <section class="screen" id="screen-login">
+    <div class="login-wrap">
+      <div class="login-mark">DN</div>
+      <div>
+        <h1 class="login-title">delivrou-notify</h1>
+        <p class="login-sub">Entrez le mot de passe pour acceder aux conversations et au journal d'envoi.</p>
+      </div>
+      <div>
+        <label class="field-label" for="pwd">Mot de passe</label>
+        <input class="login-input" type="password" id="pwd" placeholder="••••••••" />
+      </div>
+      <button class="login-btn" type="button" onclick="showDemo('list')">Entrer</button>
+      <p class="login-foot">notify.delivrou.com</p>
+    </div>
+  </section>
+
+  <!-- LISTE DES CONVERSATIONS -->
+  <section class="screen" id="screen-list" hidden>
+    <div class="fab-wrap">
+      <div class="topbar">
+        <div class="topbar-row">
+          <div class="topbar-mark">DN</div>
+          <h1>Delivrou Notify</h1>
+          <div class="topbar-avatar">A</div>
+        </div>
+        <div class="search-row">
+          <div class="search-pill">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <span>Rechercher une conversation...</span>
+          </div>
+          <button class="filter-btn" type="button" aria-label="Filtrer">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="chip-row">
+        <div class="chip-card is-live">
+          <div class="chip-icon">🟢</div>
+          <div class="label">WhatsApp</div>
+          <div class="value">Connecté</div>
+        </div>
+        <div class="chip-card">
+          <div class="chip-icon">📨</div>
+          <div class="label">37 / 500</div>
+          <div class="value">Envoyés aujourd'hui</div>
+        </div>
+        <div class="chip-card">
+          <div class="chip-icon">⏱️</div>
+          <div class="label">2 / 20</div>
+          <div class="value">Cette minute</div>
+        </div>
+        <div class="chip-card">
+          <div class="chip-icon">📥</div>
+          <div class="label">0</div>
+          <div class="value">File d'attente</div>
+        </div>
+      </div>
+
+      <div class="list">
+        <div class="section-label">Conversations récentes</div>
+
+        <button class="chat-row" type="button" onclick="showDemo('chat')">
+          <div class="avatar">MD</div>
+          <div class="chat-main">
+            <div class="chat-top">
+              <span class="chat-name">Mariama Diallo</span>
+              <span class="chat-time">21:04</span>
+            </div>
+            <div class="chat-preview"><b>Vous:</b> Votre colis JAMM-K3F9A2B a été livré. Merci !</div>
+          </div>
+        </button>
+
+        <button class="chat-row" type="button" onclick="showDemo('chat')">
+          <div class="avatar">IB</div>
+          <div class="chat-main">
+            <div class="chat-top">
+              <span class="chat-name">Ibrahima Bah — livreur</span>
+              <span class="chat-time">20:51</span>
+            </div>
+            <div class="chat-preview"><b>Vous:</b> Nouvelle course disponible à Kaloum</div>
+          </div>
+          <span class="pill-badge">1</span>
+        </button>
+
+        <button class="chat-row" type="button" onclick="showDemo('chat')">
+          <div class="avatar">FC</div>
+          <div class="chat-main">
+            <div class="chat-top">
+              <span class="chat-name">Fatoumata Camara</span>
+              <span class="chat-time">19:32</span>
+            </div>
+            <div class="chat-preview">Merci beaucoup, le livreur était très rapide 🙏</div>
+          </div>
+          <span class="pill-badge">1</span>
+        </button>
+
+        <button class="chat-row" type="button" onclick="showDemo('chat')">
+          <div class="avatar">AS</div>
+          <div class="chat-main">
+            <div class="chat-top">
+              <span class="chat-name">Alpha Sow</span>
+              <span class="chat-time">18:47</span>
+            </div>
+            <div class="chat-preview"><b>Vous:</b> Coursier assigné, Ibrahima arrive dans ~12 min</div>
+          </div>
+        </button>
+
+        <div class="section-label">
+          Démo
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+        </div>
+
+        <button class="chat-row" type="button" onclick="showDemo('chat')">
+          <div class="avatar group">PH</div>
+          <div class="chat-main">
+            <div class="chat-top">
+              <span class="chat-name">Pharmacie Niger (démo)</span>
+              <span class="chat-time">Hier</span>
+            </div>
+            <div class="chat-preview"><b>Vous:</b> Commande confirmée, préparation en cours</div>
+          </div>
+        </button>
+      </div>
+
+      <button class="fab" type="button" aria-label="Nouveau message">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+    </div>
+
+    <div class="tabbar">
+      <button class="tab is-active" type="button" onclick="showDemo('list')">
+        <span class="tab-dot"></span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        Conversations
+      </button>
+      <button class="tab" type="button" onclick="showDemo('log')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+        Journal
+      </button>
+    </div>
+  </section>
+
+  <!-- CONVERSATION DETAIL -->
+  <section class="screen" id="screen-chat" hidden>
+    <div class="chat-header">
+      <button class="back-btn" type="button" onclick="showDemo('list')" aria-label="Retour">&larr;</button>
+      <div class="avatar">MD</div>
+      <div class="chat-header-id">
+        <div class="chat-header-name">Mariama Diallo</div>
+        <div class="chat-header-sub">224 612 34 56 78</div>
+      </div>
+      <button class="icon-btn" type="button" aria-label="Voir dans le journal">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+      </button>
+    </div>
+
+    <div class="messages">
+      <div class="day-sep">Aujourd'hui</div>
+
+      <div class="bubble-row out">
+        <div class="bubble out">
+          Coursier assigné — retrait dans ~8 min<br/>Suivi : https://delivrou.com/suivi/JAMM-K3F9A2B
+          <span class="time">20:41</span>
+        </div>
+      </div>
+
+      <div class="bubble-row out">
+        <div class="bubble out">
+          Votre colis est en route, arrivée estimée dans ~15 min
+          <span class="time">20:52</span>
+        </div>
+      </div>
+
+      <div class="bubble-row in">
+        <div class="bubble in">
+          Merci, j'arrive bientôt chez moi
+          <span class="time">20:55</span>
+        </div>
+      </div>
+
+      <div class="bubble-row out">
+        <div class="bubble out">
+          Votre colis JAMM-K3F9A2B a été livré. Merci !
+          <span class="time">21:04</span>
+        </div>
+      </div>
+    </div>
+
+    <form class="composer" onsubmit="return false">
+      <input type="text" placeholder="Répondre à Mariama..." />
+      <button class="send-btn" type="submit" aria-label="Envoyer">&#9658;</button>
+    </form>
+  </section>
+
+  <!-- JOURNAL -->
+  <section class="screen" id="screen-log" hidden>
+    <div class="topbar" style="padding-bottom: 14px">
+      <div class="topbar-row">
+        <button class="back-btn" type="button" onclick="showDemo('list')" aria-label="Retour" style="color: var(--header-fg); margin-right: -4px">&larr;</button>
+        <h1>Journal</h1>
+        <div class="topbar-avatar">A</div>
+      </div>
+    </div>
+
+    <div class="filters">
+      <button class="filter-pill is-active" type="button">Tout</button>
+      <button class="filter-pill" type="button">Envoyés</button>
+      <button class="filter-pill" type="button">Échecs</button>
+      <button class="filter-pill" type="button">Bloqués</button>
+      <button class="filter-pill" type="button">Manuel</button>
+    </div>
+
+    <div class="log-list">
+      <div class="log-day-label">Aujourd'hui</div>
+
+      <div class="log-item">
+        <div class="log-icon sent">✓</div>
+        <div class="log-main">
+          <div class="log-top"><span class="log-phone">224 612 34 56 78</span><span class="log-time">21:04</span></div>
+          <div class="log-text">Votre colis JAMM-K3F9A2B a été livré. Merci !</div>
+          <div class="log-badges"><span class="badge sent">Envoyé</span><span class="badge auto">Auto</span></div>
+        </div>
+      </div>
+
+      <div class="log-item">
+        <div class="log-icon sent">✓</div>
+        <div class="log-main">
+          <div class="log-top"><span class="log-phone">224 664 11 22 33</span><span class="log-time">20:52</span></div>
+          <div class="log-text">Nouvelle course disponible à Kaloum</div>
+          <div class="log-badges"><span class="badge sent">Envoyé</span><span class="badge auto">Auto</span></div>
+        </div>
+      </div>
+
+      <div class="log-item">
+        <div class="log-icon failed">!</div>
+        <div class="log-main">
+          <div class="log-top"><span class="log-phone">224 620 98 76 54</span><span class="log-time">20:18</span></div>
+          <div class="log-text">Coursier assigné — retrait dans ~6 min</div>
+          <div class="log-badges"><span class="badge failed">Échec</span><span class="badge auto">Auto</span></div>
+          <div class="log-reason">Ce numéro n'a pas de compte WhatsApp actif</div>
+        </div>
+      </div>
+
+      <div class="log-item">
+        <div class="log-icon sent">✓</div>
+        <div class="log-main">
+          <div class="log-top"><span class="log-phone">224 655 44 33 22</span><span class="log-time">19:32</span></div>
+          <div class="log-text">Bonjour, votre livraison a bien été reçue, bonne soirée</div>
+          <div class="log-badges"><span class="badge sent">Envoyé</span><span class="badge manual">Manuel</span></div>
+        </div>
+      </div>
+
+      <div class="log-day-label">Hier</div>
+
+      <div class="log-item">
+        <div class="log-icon blocked">⏱</div>
+        <div class="log-main">
+          <div class="log-top"><span class="log-phone">224 612 34 56 78</span><span class="log-time">18:02</span></div>
+          <div class="log-text">Commande confirmée, préparation en cours</div>
+          <div class="log-badges"><span class="badge blocked">Bloqué</span><span class="badge auto">Auto</span></div>
+          <div class="log-reason">Déjà un message envoyé à ce numéro il y a moins de 10s</div>
+        </div>
+      </div>
+
+      <div class="log-item">
+        <div class="log-icon sent">✓</div>
+        <div class="log-main">
+          <div class="log-top"><span class="log-phone">224 677 20 10 05</span><span class="log-time">14:47</span></div>
+          <div class="log-text">Coursier assigné, Ibrahima arrive dans ~12 min</div>
+          <div class="log-badges"><span class="badge sent">Envoyé</span><span class="badge auto">Auto</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tabbar">
+      <button class="tab" type="button" onclick="showDemo('list')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        Conversations
+      </button>
+      <button class="tab is-active" type="button" onclick="showDemo('log')">
+        <span class="tab-dot"></span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+        Journal
+      </button>
+    </div>
+  </section>
+</div>
+
+<script>
+  function showDemo(name) {
+    document.querySelectorAll('.screen').forEach(function (el) {
+      el.hidden = el.id !== 'screen-' + name;
+    });
+    document.querySelectorAll('.demo-bar button').forEach(function (b) {
+      b.classList.toggle('is-active', b.dataset.demo === name);
+    });
+  }
+  document.querySelectorAll('.demo-bar button').forEach(function (b) {
+    b.addEventListener('click', function () { showDemo(b.dataset.demo); });
+  });
+</script>
