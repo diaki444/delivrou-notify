@@ -15,6 +15,8 @@ Le code reutilise le meme principe que [`whatsapp-mcp`](../whatsapp-mcp) (le con
 
 Il faut donc le deployer sur un **hote classique toujours allume** : un petit VPS (2 Go RAM suffisent largement), [Fly.io](https://fly.io), [Railway](https://railway.app), un Raspberry Pi, ou meme votre PC si vous le laissez allume (comme dans la video d'origine). Le backend Delivrou (Cloudflare Workers) lui fait simplement des appels HTTP sortants — ca, les Workers savent parfaitement le faire.
 
+**Guide pas-a-pas pour un VPS Hostinger (Node + PM2 + Nginx + HTTPS) : voir [`DEPLOY_HOSTINGER.md`](./DEPLOY_HOSTINGER.md).**
+
 ## ⚠️ Usage responsable
 
 - Utilisez ceci uniquement pour des **notifications transactionnelles** (le client ou le livreur a une relation active avec Delivrou : commande en cours, course assignee). Ce n'est pas un outil de SMS marketing de masse.
