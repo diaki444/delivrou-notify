@@ -63,8 +63,45 @@ Pas d'authentification. Retourne `{ "ok": true }` si le process tourne (utile po
 
 ### `GET /status`
 ```json
-{ "ok": true, "connected": true, "queueLength": 0 }
+{
+  "ok": true,
+  "connected": true,
+  "queueLength": 0,
+  "safety": {
+    "sentLastMinute": 2,
+    "maxPerMinute": 20,
+    "sentToday": 37,
+    "maxPerDay": 500,
+    "consecutiveFailures": 0,
+    "circuitOpen": false,
+    "circuitOpenUntil": null
+  }
+}
 ```
+
+## Garde-fous anti-blocage WhatsApp
+
+En plus du delai minimum entre deux envois, le service applique automatiquement :
+
+- **Cooldown par destinataire** (`WHATSAPP_PER_RECIPIENT_COOLDOWN_MS`, defaut 10s) : pas deux messages au meme numero trop rapproches.
+- **Limite par minute** (`WHATSAPP_MAX_PER_MINUTE`, defaut 20) et **par jour** (`WHATSAPP_MAX_PER_DAY`, defaut 500), toutes destinations confondues — protege contre un bug cote app qui enverrait en masse par erreur.
+- **Coupe-circuit automatique** (`WHATSAPP_CIRCUIT_FAILURE_THRESHOLD`, defaut 5 echecs consecutifs) : si WhatsApp se met a refuser les envois (signe possible de restriction en cours), le service **suspend automatiquement** les envois pendant `WHATSAPP_CIRCUIT_COOLDOWN_MS` (defaut 5 min) au lieu d'insister.
+
+Un appel a `POST /send` refuse par ces garde-fous renvoie `HTTP 429` avec un message explicatif dans `error`, et `retryAfterMs` quand c'est pertinent. Ajustez les valeurs dans `.env` selon votre volume reel (voir `.env.example`).
+
+Ces limites reduisent le risque mais ne l'eliminent pas : WhatsApp Web via Baileys reste un protocole non officiel. Pour un volume important sans risque, voir la section suivante.
+
+## Migrer vers l'API officielle WhatsApp Business (Meta Cloud API)
+
+Le protocole utilise ici (WhatsApp Web via Baileys) n'est pas officiellement sanctionne par Meta pour de l'automatisation — a fort volume, le risque de blocage du numero augmente. L'alternative sans risque est l'**API officielle WhatsApp Business (Cloud API)**, hebergee directement par Meta (pas de QR code, pas de session a maintenir, pas de VPS necessaire pour la connexion elle-meme).
+
+Migration prevue (quand vous etes pret) :
+1. Creer et verifier un **compte Meta Business**.
+2. Enregistrer un numero WhatsApp Business officiel.
+3. Faire approuver des **modeles de message** ("templates") pour les notifications proactives.
+4. Remplacer uniquement l'implementation interne de `src/whatsapp-client.ts` (appels HTTPS vers `graph.facebook.com` au lieu de Baileys) — **l'API `POST /send` exposee a `jamm-express-deliveries` reste identique**, aucun changement cote backend Delivrou.
+
+Cout : gratuit jusqu'a un certain volume/mois selon les pays, puis paye au message au-dela (sans marge d'intermediaire type Twilio/NimbaSMS/Wazzap).
 
 ### `POST /check`
 Verifie si un numero a un compte WhatsApp actif (evite d'essayer d'envoyer a un numero qui n'en a pas).

@@ -2,6 +2,7 @@ import "dotenv/config";
 import express, { type NextFunction, type Request, type Response } from "express";
 import QRCode from "qrcode";
 import { whatsapp } from "./whatsapp-client.js";
+import { checkCanSend, recordSentSuccess, recordSentFailure, getSafetyStatus } from "./safety.js";
 
 const PORT = Number(process.env.PORT || 3300);
 const NOTIFY_SECRET = process.env.NOTIFY_SECRET;
@@ -47,8 +48,10 @@ function enqueueSend(phone: string, text: string): Promise<void> {
           setTimeout(() => rej(new Error("Timeout d'envoi WhatsApp")), SEND_TIMEOUT_MS),
         );
         await Promise.race([whatsapp.sendText(phone, text), timeout]);
+        recordSentSuccess(phone);
         resolve();
       } catch (err) {
+        recordSentFailure();
         reject(err instanceof Error ? err : new Error(String(err)));
       }
     };
@@ -79,7 +82,12 @@ app.get("/health", (_req, res) => {
 });
 
 app.get("/status", requireAuth, (_req, res) => {
-  res.json({ ok: true, connected: whatsapp.isConnected(), queueLength: queue.length });
+  res.json({
+    ok: true,
+    connected: whatsapp.isConnected(),
+    queueLength: queue.length,
+    safety: getSafetyStatus(),
+  });
 });
 
 // Page web pour scanner le QR code depuis un navigateur (plus fiable que les
@@ -149,6 +157,12 @@ app.post("/send", requireAuth, async (req, res) => {
   }
   if (!whatsapp.isConnected()) {
     res.status(503).json({ ok: false, error: "WhatsApp non connecte (QR pas encore scanne ou reconnexion en cours)" });
+    return;
+  }
+
+  const safety = checkCanSend(phone);
+  if (!safety.allowed) {
+    res.status(429).json({ ok: false, error: safety.reason, retryAfterMs: safety.retryAfterMs });
     return;
   }
 
