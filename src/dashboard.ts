@@ -1,8 +1,21 @@
 import { Router } from "express";
 import { whatsapp } from "./whatsapp-client.js";
 import { getSafetyStatus } from "./safety.js";
-import { listChats, getChat, getMessages, listSendLog, listTemplates, addTemplate, deleteTemplate } from "./store.js";
+import {
+  listChats,
+  getChat,
+  getMessages,
+  listSendLog,
+  listTemplates,
+  addTemplate,
+  deleteTemplate,
+  listProspects,
+  addProspects,
+  markProspectContacted,
+  deleteProspect,
+} from "./store.js";
 import { sendWithGuards, queueLength } from "./send-queue.js";
+import { searchPlaces, phoneToDigits, isPlacesConfigured } from "./places.js";
 import {
   isDashboardConfigured,
   checkPassword,
@@ -42,6 +55,7 @@ const ICONS = {
   template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h16"/></svg>`,
   chats: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`,
   log: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>`,
+  prospects: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M8 11h6"/></svg>`,
   plus: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>`,
   send: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 11l18-8-8 18-2-8-8-2z"/></svg>`,
   trash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m2 0-1 13a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1L6 7"/></svg>`,
@@ -202,6 +216,19 @@ function shell(title: string, bodyHtml: string): string {
   .ghost-btn { background: var(--surface-2); border: 1px solid var(--border); color: var(--fg-muted); border-radius: 8px; padding: 7px 11px; font-size: 12.5px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 5px; }
   .ghost-btn svg { width: 13px; height: 13px; }
   textarea.text-input { resize: vertical; min-height: 80px; font-family: inherit; }
+
+  .search-form-row { display: flex; gap: 8px; margin-bottom: 14px; }
+  .search-form-row input { flex: 1; }
+  .prospect-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 11px 13px; margin-bottom: 8px; display: flex; gap: 10px; align-items: flex-start; }
+  .prospect-card input[type=checkbox] { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--accent); flex: none; }
+  .prospect-main { flex: 1; min-width: 0; }
+  .prospect-name { font-weight: 700; font-size: 14px; }
+  .prospect-meta { font-size: 12.5px; color: var(--fg-muted); margin-top: 2px; }
+  .prospect-phone { font-size: 12.5px; color: var(--fg); margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .prospect-contacted { font-size: 10.5px; font-weight: 700; color: var(--ok); background: var(--ok-wash); padding: 1px 7px; border-radius: 999px; display: inline-block; margin-top: 4px; }
+  .select-all-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 13px; color: var(--fg-muted); }
+  .select-all-row input { width: 16px; height: 16px; accent-color: var(--accent); }
+  .sticky-send-bar { position: sticky; bottom: 56px; background: var(--surface); border-top: 1px solid var(--border); padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px)); margin: 0 -16px -90px; }
 </style>
 </head>
 <body>
@@ -212,10 +239,13 @@ ${bodyHtml}
 </html>`;
 }
 
-function tabbar(active: "chats" | "logs"): string {
+function tabbar(active: "chats" | "logs" | "prospects"): string {
+  const tab = (key: "chats" | "logs" | "prospects", href: string, icon: string, label: string) =>
+    `<a class="tab ${active === key ? "is-active" : ""}" href="${href}">${active === key ? '<span class="tab-dot"></span>' : ""}${icon}${label}</a>`;
   return `<div class="tabbar">
-    <a class="tab ${active === "chats" ? "is-active" : ""}" href="/dashboard">${active === "chats" ? '<span class="tab-dot"></span>' : ""}${ICONS.chats}Conversations</a>
-    <a class="tab ${active === "logs" ? "is-active" : ""}" href="/dashboard/logs">${active === "logs" ? '<span class="tab-dot"></span>' : ""}${ICONS.log}Journal</a>
+    ${tab("chats", "/dashboard", ICONS.chats, "Conversations")}
+    ${tab("prospects", "/dashboard/prospection", ICONS.prospects, "Prospects")}
+    ${tab("logs", "/dashboard/logs", ICONS.log, "Journal")}
   </div>`;
 }
 
@@ -531,4 +561,146 @@ dashboardRouter.post("/templates", (req, res) => {
 dashboardRouter.post("/templates/:id/delete", (req, res) => {
   deleteTemplate(req.params.id);
   res.redirect("/dashboard/templates");
+});
+
+dashboardRouter.get("/prospection", (req, res) => {
+  const prospects = listProspects(300);
+  const templates = listTemplates();
+
+  let banner = "";
+  if (req.query.searchError) {
+    banner = `<div class="err-banner">${escapeHtml(String(req.query.searchError))}</div>`;
+  } else if (req.query.added !== undefined) {
+    const added = Number(req.query.added) || 0;
+    const dup = Number(req.query.dup) || 0;
+    banner = `<div class="err-banner" style="background:var(--ok-wash);color:var(--ok)">${added} nouveau(x) prospect(s) ajouté(s)${dup ? `, ${dup} déjà présent(s) ignoré(s)` : ""}.</div>`;
+  } else if (req.query.sent !== undefined) {
+    const sent = Number(req.query.sent) || 0;
+    const failed = Number(req.query.failed) || 0;
+    banner = `<div class="err-banner" style="background:var(--ok-wash);color:var(--ok)">${sent} message(s) envoyé(s)${failed ? `, ${failed} échec(s)/bloqué(s)` : ""}.</div>`;
+  }
+
+  const prospectRows = prospects.length
+    ? prospects
+        .map(
+          (p) => `<label class="prospect-card">
+        <input type="checkbox" name="ids" value="${escapeHtml(p.id)}" form="send-form" />
+        <div class="prospect-main">
+          <div class="prospect-name">${escapeHtml(p.name)}</div>
+          ${p.category || p.address ? `<div class="prospect-meta">${escapeHtml([p.category, p.address].filter(Boolean).join(" · "))}</div>` : ""}
+          <div class="prospect-phone">${escapeHtml(p.phone)}</div>
+          ${p.contacted ? `<span class="prospect-contacted">Contacté</span>` : ""}
+        </div>
+      </label>`,
+        )
+        .join("")
+    : `<div class="empty">Aucun prospect pour le moment. Cherchez ci-dessus (ex: "pharmacies", "épiceries", "restaurants") pour en ajouter automatiquement.</div>`;
+
+  res.send(
+    shell(
+      "Prospection",
+      `<div class="topbar" style="padding-bottom:14px">
+        <div class="topbar-row">
+          <div class="topbar-mark">DN</div>
+          <h1>Prospection</h1>
+          <a class="topbar-avatar" href="/dashboard/templates">A</a>
+        </div>
+      </div>
+      <div class="page-pad">
+        ${banner}
+        ${
+          !isPlacesConfigured()
+            ? `<div class="err-banner">Recherche non configurée : définissez GOOGLE_PLACES_API_KEY dans les variables d'environnement pour activer la recherche automatique d'établissements.</div>`
+            : ""
+        }
+        <form class="search-form-row" method="post" action="/dashboard/prospection/search">
+          <input class="text-input" type="text" name="query" placeholder="Ex: pharmacies, épiceries, restaurants..." required />
+          <button class="primary-btn" type="submit" style="width:auto;white-space:nowrap">${ICONS.search}</button>
+        </form>
+
+        <h2 style="font-size:15px;margin:4px 0 10px">Prospects (${prospects.length})</h2>
+        ${
+          prospects.length
+            ? `<label class="select-all-row"><input type="checkbox" onchange="document.querySelectorAll('input[name=ids]').forEach(c=>c.checked=this.checked)" /> Tout cocher</label>`
+            : ""
+        }
+        ${prospectRows}
+      </div>
+
+      <form id="send-form" method="post" action="/dashboard/prospection/send">
+        <div class="sticky-send-bar">
+          ${
+            templates.length
+              ? `<select class="text-input" style="margin-bottom:8px" onchange="document.getElementById('prospection-text').value=this.value">
+                   <option value="">— Choisir un modèle —</option>
+                   ${templates.map((t) => `<option value="${escapeHtml(t.body)}">${escapeHtml(t.name)}</option>`).join("")}
+                 </select>`
+              : ""
+          }
+          <div style="display:flex;gap:8px">
+            <input class="text-input" type="text" id="prospection-text" name="text" placeholder="Message à envoyer aux prospects cochés" required />
+            <button class="send-btn" type="submit" aria-label="Envoyer" style="width:auto;padding:0 16px">${ICONS.send}</button>
+          </div>
+        </div>
+      </form>
+      ${tabbar("prospects")}`,
+    ),
+  );
+});
+
+dashboardRouter.post("/prospection/search", async (req, res) => {
+  const query = String(req.body?.query || "").trim();
+  if (!query) {
+    res.redirect("/dashboard/prospection");
+    return;
+  }
+
+  const result = await searchPlaces(query);
+  if (!result.ok) {
+    res.redirect(`/dashboard/prospection?searchError=${encodeURIComponent(result.error || "Recherche échouée")}`);
+    return;
+  }
+
+  const withPhone = result.results
+    .map((r) => {
+      const phone = r.phone ? phoneToDigits(r.phone) : null;
+      return phone ? { id: r.id, name: r.name, phone, address: r.address, category: r.category } : null;
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null);
+
+  const { added, duplicates } = addProspects(query, withPhone);
+  res.redirect(`/dashboard/prospection?added=${added}&dup=${duplicates}`);
+});
+
+dashboardRouter.post("/prospection/send", async (req, res) => {
+  const text = String(req.body?.text || "").trim();
+  const rawIds = req.body?.ids;
+  const ids = Array.isArray(rawIds) ? rawIds.map(String) : rawIds ? [String(rawIds)] : [];
+
+  if (!text || ids.length === 0) {
+    res.redirect("/dashboard/prospection");
+    return;
+  }
+
+  let sent = 0;
+  let failed = 0;
+  for (const id of ids) {
+    const prospects = listProspects(1000);
+    const p = prospects.find((x) => x.id === id);
+    if (!p) continue;
+    const result = await sendWithGuards(p.phone, text, "manual");
+    if (result.ok) {
+      markProspectContacted(id);
+      sent++;
+    } else {
+      failed++;
+    }
+  }
+
+  res.redirect(`/dashboard/prospection?sent=${sent}&failed=${failed}`);
+});
+
+dashboardRouter.post("/prospection/:id/delete", (req, res) => {
+  deleteProspect(req.params.id);
+  res.redirect("/dashboard/prospection");
 });

@@ -60,6 +60,7 @@ Une interface web simple, accessible depuis n'importe quel navigateur (pas besoi
 
 - **Conversations** : liste des discussions WhatsApp (clients/livreurs) avec historique des messages.
 - **Envoi manuel** : repondre a un client, ou envoyer un message libre a un numero, directement depuis la page.
+- **Prospection** : recherche automatique d'etablissements reels (pharmacies, epiceries, restaurants...) via Google Places, ajoutes comme prospects, avec envoi WhatsApp en lot (garde-fous anti-blocage toujours actifs). Voir la section dediee ci-dessous.
 - **Journal** : historique des 500 derniers envois (automatiques et manuels), avec statut (envoye/echec/bloque par un garde-fou) et raison en cas de probleme.
 
 Protege par un mot de passe unique (`DASHBOARD_PASSWORD` dans `.env` — voir `.env.example`). Laissez cette variable vide pour desactiver completement le tableau de bord.
@@ -104,6 +105,37 @@ En plus du delai minimum entre deux envois, le service applique automatiquement 
 Un appel a `POST /send` refuse par ces garde-fous renvoie `HTTP 429` avec un message explicatif dans `error`, et `retryAfterMs` quand c'est pertinent. Ajustez les valeurs dans `.env` selon votre volume reel (voir `.env.example`).
 
 Ces limites reduisent le risque mais ne l'eliminent pas : WhatsApp Web via Baileys reste un protocole non officiel. Pour un volume important sans risque, voir la section suivante.
+
+## Prospection automatique (Google Places)
+
+Permet de chercher de vrais etablissements (pharmacies, epiceries, restaurants...) a Conakry, avec leur numero de telephone, directement depuis `/dashboard/prospection`.
+
+### Creer la cle API
+
+1. Allez sur [console.cloud.google.com](https://console.cloud.google.com) et creez un projet (ou utilisez-en un existant).
+2. Menu **APIs & Services > Library**, cherchez **"Places API (New)"**, cliquez **Enable**.
+3. Menu **APIs & Services > Credentials > Create credentials > API key**.
+4. (Recommande) Restreignez la cle : **API restrictions > Restrict key**, cochez uniquement **Places API (New)**.
+5. Activez la facturation sur le projet (obligatoire pour utiliser l'API) — Google offre un credit gratuit mensuel qui couvre largement un usage de prospection normal ; au-dela, chaque recherche est facturee quelques centimes.
+6. Copiez la cle (commence par `AIza...`).
+
+### Configurer
+
+Ajoutez dans `.env` (ou les variables d'environnement EasyPanel) :
+```
+GOOGLE_PLACES_API_KEY=AIza...
+```
+
+### Usage
+
+1. Dans l'onglet **Prospects**, tapez une recherche (ex: "pharmacies", "epiceries", "restaurants Kaloum") et validez.
+2. Les etablissements trouves avec un numero de telephone sont ajoutes automatiquement a la liste (les doublons par numero sont ignores).
+3. Cochez les prospects a contacter (ou "Tout cocher"), choisissez eventuellement un modele de message, ecrivez/ajustez le texte, et envoyez.
+4. Les envois passent par les memes garde-fous anti-blocage que le reste (delai, limites par minute/jour) — un envoi en lot reste donc etale dans le temps, pas instantane.
+
+Les prospects contactes restent dans la liste avec un badge "Contacte", pour eviter de redemarcher la meme entreprise par erreur.
+
+> Rappel : il s'agit de prospection a froid vers des inconnus — le risque de blocage du numero WhatsApp est plus eleve que pour les notifications transactionnelles. Dediez un numero specifique a cet usage si le volume devient important, et restez raisonnable sur la frequence.
 
 ## Migrer vers l'API officielle WhatsApp Business (Meta Cloud API)
 

@@ -42,6 +42,17 @@ export interface MessageTemplate {
   createdAt: number;
 }
 
+export interface Prospect {
+  id: string;
+  name: string;
+  phone: string; // chiffres uniquement
+  address?: string;
+  category?: string;
+  query: string; // recherche d'origine
+  addedAt: number;
+  contacted: boolean;
+}
+
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
 const DATA_FILE = path.join(AUTH_DIR, "dashboard_data.json");
 
@@ -53,12 +64,14 @@ interface DiskShape {
   messages: Record<string, StoredMessage[]>;
   sendLog: SendLogEntry[];
   templates: MessageTemplate[];
+  prospects: Prospect[];
 }
 
 let chats = new Map<string, ChatMeta>();
 let messages = new Map<string, StoredMessage[]>();
 let sendLog: SendLogEntry[] = [];
 let templates: MessageTemplate[] = [];
+let prospects: Prospect[] = [];
 
 function load() {
   try {
@@ -69,6 +82,7 @@ function load() {
     messages = new Map(Object.entries(parsed.messages || {}));
     sendLog = parsed.sendLog || [];
     templates = parsed.templates || [];
+    prospects = parsed.prospects || [];
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error("[delivrou-notify] Impossible de charger l'historique sauvegarde:", err);
@@ -87,6 +101,7 @@ function scheduleSave() {
         messages: Object.fromEntries(messages),
         sendLog,
         templates,
+        prospects,
       };
       fs.writeFileSync(DATA_FILE, JSON.stringify(shape), "utf8");
     } catch (err) {
@@ -165,5 +180,54 @@ export function addTemplate(name: string, body: string): MessageTemplate {
 
 export function deleteTemplate(id: string) {
   templates = templates.filter((t) => t.id !== id);
+  scheduleSave();
+}
+
+export function listProspects(limit = 300): Prospect[] {
+  return [...prospects].sort((a, b) => b.addedAt - a.addedAt).slice(0, limit);
+}
+
+export function getProspect(id: string): Prospect | undefined {
+  return prospects.find((p) => p.id === id);
+}
+
+/** Ajoute des prospects trouves par une recherche, en evitant les doublons par numero. */
+export function addProspects(
+  query: string,
+  found: Array<{ id: string; name: string; phone: string; address?: string; category?: string }>,
+): { added: number; duplicates: number } {
+  const existingPhones = new Set(prospects.map((p) => p.phone));
+  let added = 0;
+  let duplicates = 0;
+  for (const f of found) {
+    if (existingPhones.has(f.phone)) {
+      duplicates++;
+      continue;
+    }
+    prospects.push({
+      id: f.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: f.name,
+      phone: f.phone,
+      address: f.address,
+      category: f.category,
+      query,
+      addedAt: Date.now(),
+      contacted: false,
+    });
+    existingPhones.add(f.phone);
+    added++;
+  }
+  scheduleSave();
+  return { added, duplicates };
+}
+
+export function markProspectContacted(id: string) {
+  const p = prospects.find((x) => x.id === id);
+  if (p) p.contacted = true;
+  scheduleSave();
+}
+
+export function deleteProspect(id: string) {
+  prospects = prospects.filter((p) => p.id !== id);
   scheduleSave();
 }
