@@ -54,6 +54,20 @@ Une fois connecte, les cles de session sont sauvegardees dans `auth_info/` (ne p
 | `WHATSAPP_MIN_DELAY_MS` | Non (def. 1500) | Delai minimum entre deux envois, pour lisser les pics et reduire le risque de blocage. |
 | `WHATSAPP_SEND_TIMEOUT_MS` | Non (def. 20000) | Delai max d'attente pour un envoi avant de considerer l'appel en echec. |
 
+## Tableau de bord web
+
+Une interface web simple, accessible depuis n'importe quel navigateur (pas besoin de retourner dans EasyPanel/VPS/Lovable au quotidien), sur `https://notify.delivrou.com/dashboard` :
+
+- **Conversations** : liste des discussions WhatsApp (clients/livreurs) avec historique des messages.
+- **Envoi manuel** : repondre a un client, ou envoyer un message libre a un numero, directement depuis la page.
+- **Journal** : historique des 500 derniers envois (automatiques et manuels), avec statut (envoye/echec/bloque par un garde-fou) et raison en cas de probleme.
+
+Protege par un mot de passe unique (`DASHBOARD_PASSWORD` dans `.env` — voir `.env.example`). Laissez cette variable vide pour desactiver completement le tableau de bord.
+
+L'historique (conversations + journal) est sauvegarde dans `auth_info/dashboard_data.json`, donc persiste via le meme volume que la session WhatsApp — pas de base de donnees supplementaire a gerer.
+
+> Note : seuls les messages recus ou envoyes **depuis que le service tourne** apparaissent (WhatsApp Web ne transmet pas tout l'historique d'un compte a un client tiers comme Baileys).
+
 ## API
 
 Toutes les routes (sauf `/health`) demandent l'en-tete `x-notify-key: <NOTIFY_SECRET>`.

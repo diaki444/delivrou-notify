@@ -2,12 +2,13 @@ import "dotenv/config";
 import express, { type NextFunction, type Request, type Response } from "express";
 import QRCode from "qrcode";
 import { whatsapp } from "./whatsapp-client.js";
-import { checkCanSend, recordSentSuccess, recordSentFailure, getSafetyStatus } from "./safety.js";
+import { getSafetyStatus } from "./safety.js";
+import { sendWithGuards, queueLength } from "./send-queue.js";
+import { dashboardRouter } from "./dashboard.js";
+import { isDashboardConfigured } from "./auth.js";
 
 const PORT = Number(process.env.PORT || 3300);
 const NOTIFY_SECRET = process.env.NOTIFY_SECRET;
-const MIN_DELAY_MS = Number(process.env.WHATSAPP_MIN_DELAY_MS || 1500);
-const SEND_TIMEOUT_MS = Number(process.env.WHATSAPP_SEND_TIMEOUT_MS || 20000);
 
 if (!NOTIFY_SECRET) {
   // eslint-disable-next-line no-console
@@ -17,51 +18,16 @@ if (!NOTIFY_SECRET) {
       "(sinon n'importe qui pourrait envoyer des messages depuis votre numero).",
   );
 }
-
-// --- File d'attente simple pour serialiser les envois et respecter un delai
-// minimum entre deux messages (reduit le risque de blocage WhatsApp lors
-// d'un pic de notifications, ex: plusieurs commandes au meme moment). ---
-type Job = () => Promise<void>;
-const queue: Job[] = [];
-let processing = false;
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function drainQueue() {
-  if (processing) return;
-  processing = true;
-  while (queue.length > 0) {
-    const job = queue.shift()!;
-    await job();
-    await sleep(MIN_DELAY_MS);
-  }
-  processing = false;
-}
-
-function enqueueSend(phone: string, text: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const job: Job = async () => {
-      try {
-        const timeout = new Promise<never>((_, rej) =>
-          setTimeout(() => rej(new Error("Timeout d'envoi WhatsApp")), SEND_TIMEOUT_MS),
-        );
-        await Promise.race([whatsapp.sendText(phone, text), timeout]);
-        recordSentSuccess(phone);
-        resolve();
-      } catch (err) {
-        recordSentFailure();
-        reject(err instanceof Error ? err : new Error(String(err)));
-      }
-    };
-    queue.push(job);
-    void drainQueue();
-  });
+if (!isDashboardConfigured()) {
+  // eslint-disable-next-line no-console
+  console.error(
+    "[delivrou-notify] Info : DASHBOARD_PASSWORD n'est pas defini, le tableau de bord web (/dashboard) est desactive.",
+  );
 }
 
 const app = express();
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 
 function requireAuth(req: Request, res: Response, next: NextFunction) {
   if (!NOTIFY_SECRET) {
@@ -85,7 +51,7 @@ app.get("/status", requireAuth, (_req, res) => {
   res.json({
     ok: true,
     connected: whatsapp.isConnected(),
-    queueLength: queue.length,
+    queueLength: queueLength(),
     safety: getSafetyStatus(),
   });
 });
@@ -160,19 +126,17 @@ app.post("/send", requireAuth, async (req, res) => {
     return;
   }
 
-  const safety = checkCanSend(phone);
-  if (!safety.allowed) {
-    res.status(429).json({ ok: false, error: safety.reason, retryAfterMs: safety.retryAfterMs });
+  const result = await sendWithGuards(phone, text, "auto");
+  if (!result.ok) {
+    res.status(result.blocked ? 429 : 500).json({ ok: false, error: result.error });
     return;
   }
-
-  try {
-    await enqueueSend(phone, text);
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: (err as Error).message });
-  }
+  res.json({ ok: true });
 });
+
+// Tableau de bord web (conversations, envoi manuel, journal). Desactive
+// automatiquement si DASHBOARD_PASSWORD n'est pas configure.
+app.use("/dashboard", dashboardRouter);
 
 app.listen(PORT, () => {
   // eslint-disable-next-line no-console

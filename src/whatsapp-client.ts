@@ -8,7 +8,9 @@ import makeWASocket, {
   fetchLatestBaileysVersion,
   DisconnectReason,
   type WASocket,
+  type proto,
 } from "@whiskeysockets/baileys";
+import { recordMessage, upsertChat } from "./store.js";
 
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
 
@@ -17,6 +19,7 @@ class WhatsAppClient {
   private connected = false;
   private connecting = false;
   private lastQr: string | null = null;
+  private contactNames = new Map<string, string>();
 
   isConnected(): boolean {
     return this.connected;
@@ -45,6 +48,24 @@ class WhatsAppClient {
     this.sock = sock;
 
     sock.ev.on("creds.update", saveCreds);
+
+    sock.ev.on("contacts.upsert", (list) => {
+      for (const c of list) {
+        if (!c.id) continue;
+        this.contactNames.set(c.id, c.name || c.notify || "");
+      }
+    });
+
+    sock.ev.on("chats.upsert", (list) => {
+      for (const c of list) {
+        if (!c.id) continue;
+        upsertChat(c.id, { name: c.name || this.contactNames.get(c.id) || undefined });
+      }
+    });
+
+    sock.ev.on("messages.upsert", ({ messages: incoming }) => {
+      for (const m of incoming) this.recordIncoming(m);
+    });
 
     sock.ev.on("connection.update", (update) => {
       const { connection, lastDisconnect, qr } = update;
@@ -78,6 +99,32 @@ class WhatsAppClient {
           setTimeout(() => void this.connect(), 2000);
         }
       }
+    });
+  }
+
+  private recordIncoming(m: proto.IWebMessageInfo) {
+    const jid = m.key.remoteJid;
+    if (!jid || jid === "status@broadcast") return;
+    const text =
+      m.message?.conversation ??
+      m.message?.extendedTextMessage?.text ??
+      m.message?.imageMessage?.caption ??
+      m.message?.videoMessage?.caption ??
+      (m.message ? "[message non-texte]" : "");
+    if (!text) return;
+
+    const senderJid = m.key.participant || jid;
+    const senderName = this.contactNames.get(senderJid) || m.pushName || undefined;
+
+    recordMessage({
+      id: m.key.id ?? `${Date.now()}`,
+      chatJid: jid,
+      fromMe: Boolean(m.key.fromMe),
+      senderName,
+      text,
+      timestamp:
+        (typeof m.messageTimestamp === "number" ? m.messageTimestamp : Number(m.messageTimestamp ?? 0)) * 1000 ||
+        Date.now(),
     });
   }
 
