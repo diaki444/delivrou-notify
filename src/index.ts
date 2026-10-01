@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express, { type NextFunction, type Request, type Response } from "express";
+import QRCode from "qrcode";
 import { whatsapp } from "./whatsapp-client.js";
 
 const PORT = Number(process.env.PORT || 3300);
@@ -79,6 +80,45 @@ app.get("/health", (_req, res) => {
 
 app.get("/status", requireAuth, (_req, res) => {
   res.json({ ok: true, connected: whatsapp.isConnected(), queueLength: queue.length });
+});
+
+// Page web pour scanner le QR code depuis un navigateur (plus fiable que les
+// logs en mode texte d'un panneau comme EasyPanel). Protegee par ?key=...
+// car un GET classique de navigateur ne permet pas d'envoyer un en-tete
+// personnalise facilement.
+app.get("/qr", async (req, res) => {
+  if (!NOTIFY_SECRET || req.query.key !== NOTIFY_SECRET) {
+    res.status(401).send("Unauthorized");
+    return;
+  }
+
+  if (whatsapp.isConnected()) {
+    res.send(
+      "<!doctype html><meta charset='utf-8'><body style='font-family:sans-serif;text-align:center;padding:40px'>" +
+        "<h1>✅ WhatsApp deja connecte</h1><p>Rien a scanner, le service est pret.</p></body>",
+    );
+    return;
+  }
+
+  const qr = whatsapp.getLastQr();
+  if (!qr) {
+    res.send(
+      "<!doctype html><meta charset='utf-8'><meta http-equiv='refresh' content='3'>" +
+        "<body style='font-family:sans-serif;text-align:center;padding:40px'>" +
+        "<h1>⏳ En attente du QR code...</h1><p>Cette page se rafraichit automatiquement.</p></body>",
+    );
+    return;
+  }
+
+  const dataUrl = await QRCode.toDataURL(qr, { width: 320, margin: 2 });
+  res.send(
+    "<!doctype html><meta charset='utf-8'><meta http-equiv='refresh' content='20'>" +
+      "<body style='font-family:sans-serif;text-align:center;padding:40px'>" +
+      "<h1>Scannez ce QR code</h1>" +
+      "<p>WhatsApp &gt; Parametres &gt; Appareils lies &gt; Lier un appareil</p>" +
+      `<img src="${dataUrl}" alt="QR code WhatsApp" style="margin:20px auto" />` +
+      "<p style='color:#888'>Cette page se rafraichit automatiquement toutes les 20 secondes.</p></body>",
+  );
 });
 
 app.post("/check", requireAuth, async (req, res) => {
