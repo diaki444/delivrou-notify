@@ -1,0 +1,98 @@
+import fs from "node:fs";
+import path from "node:path";
+import { Boom } from "@hapi/boom";
+import P from "pino";
+import qrcode from "qrcode-terminal";
+import makeWASocket, {
+  useMultiFileAuthState,
+  fetchLatestBaileysVersion,
+  DisconnectReason,
+  type WASocket,
+} from "@whiskeysockets/baileys";
+
+const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
+
+class WhatsAppClient {
+  private sock: WASocket | null = null;
+  private connected = false;
+  private connecting = false;
+  private lastQr: string | null = null;
+
+  isConnected(): boolean {
+    return this.connected;
+  }
+
+  /** Dernier QR code recu, au cas ou vous devez le reafficher sans redemarrer le service. */
+  getLastQr(): string | null {
+    return this.lastQr;
+  }
+
+  async connect(): Promise<void> {
+    if (this.connected || this.connecting) return;
+    this.connecting = true;
+
+    if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true });
+    const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+    const { version } = await fetchLatestBaileysVersion();
+
+    const sock = makeWASocket({
+      version,
+      auth: state,
+      logger: P({ level: "silent" }) as any,
+      printQRInTerminal: false,
+      syncFullHistory: false,
+    });
+    this.sock = sock;
+
+    sock.ev.on("creds.update", saveCreds);
+
+    sock.ev.on("connection.update", (update) => {
+      const { connection, lastDisconnect, qr } = update;
+
+      if (qr) {
+        this.lastQr = qr;
+        // eslint-disable-next-line no-console
+        console.error("\n[delivrou-notify] Scannez ce QR code (WhatsApp > Appareils lies > Lier un appareil) :\n");
+        qrcode.generate(qr, { small: true });
+      }
+
+      if (connection === "open") {
+        this.connected = true;
+        this.connecting = false;
+        this.lastQr = null;
+        // eslint-disable-next-line no-console
+        console.error("[delivrou-notify] Connecte a WhatsApp. Pret a envoyer des notifications.");
+      }
+
+      if (connection === "close") {
+        this.connected = false;
+        this.connecting = false;
+        const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+        const loggedOut = statusCode === DisconnectReason.loggedOut;
+        // eslint-disable-next-line no-console
+        console.error(
+          `[delivrou-notify] Connexion fermee (code ${statusCode ?? "inconnu"}).`,
+          loggedOut ? "Deconnecte : supprimez auth_info/ et rescannez un QR." : "Reconnexion...",
+        );
+        if (!loggedOut) {
+          setTimeout(() => void this.connect(), 2000);
+        }
+      }
+    });
+  }
+
+  async numberHasWhatsApp(phoneDigits: string): Promise<boolean> {
+    if (!this.sock) throw new Error("WhatsApp non connecte");
+    const results = await this.sock.onWhatsApp(phoneDigits);
+    return Boolean(results?.[0]?.exists);
+  }
+
+  async sendText(phoneDigits: string, text: string): Promise<void> {
+    if (!this.sock) throw new Error("WhatsApp non connecte");
+    if (!this.connected) throw new Error("WhatsApp pas encore pret (en attente de connexion)");
+    const jid = `${phoneDigits}@s.whatsapp.net`;
+    await this.sock.sendMessage(jid, { text });
+  }
+}
+
+export const whatsapp = new WhatsAppClient();
