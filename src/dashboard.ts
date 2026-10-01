@@ -68,8 +68,10 @@ function shell(title: string, bodyHtml: string): string {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="format-detection" content="telephone=no" />
 <title>${escapeHtml(title)} — delivrou-notify</title>
 <style>
+  html, body { overflow-x: hidden; max-width: 100%; }
   :root {
     --bg: #0c0b0a;
     --header: #3a1a10;
@@ -110,7 +112,7 @@ function shell(title: string, bodyHtml: string): string {
   .search-row { display: flex; gap: 8px; margin-top: 12px; }
   .search-pill { flex: 1; display: flex; align-items: center; gap: 8px; padding: 9px 13px; border-radius: 10px; background: rgba(255,255,255,.14); color: var(--header-fg); min-width: 0; border: none; }
   .search-pill svg { width: 15px; height: 15px; opacity: .8; flex: none; }
-  .search-pill input { background: none; border: none; outline: none; color: var(--header-fg); font-size: 13.5px; width: 100%; }
+  .search-pill input { background: none; border: none; outline: none; color: var(--header-fg); font-size: 16px; width: 100%; }
   .search-pill input::placeholder { color: rgba(251,236,227,.7); }
   .filter-btn { width: 36px; height: 36px; border-radius: 10px; border: none; background: rgba(255,255,255,.14); color: var(--header-fg); display: flex; align-items: center; justify-content: center; flex: none; text-decoration: none; }
   .filter-btn svg { width: 16px; height: 16px; }
@@ -142,7 +144,7 @@ function shell(title: string, bodyHtml: string): string {
   .fab-wrap { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
   .composer { display: flex; gap: 8px; padding: 10px 12px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); background: var(--surface); border-top: 1px solid var(--border); }
-  .composer input[type=text] { flex: 1; border: 1px solid var(--border); background: var(--surface-2); border-radius: 20px; padding: 10px 14px; font-size: 14px; color: var(--fg); min-width: 0; }
+  .composer input[type=text] { flex: 1; border: 1px solid var(--border); background: var(--surface-2); border-radius: 20px; padding: 10px 14px; font-size: 16px; color: var(--fg); min-width: 0; }
   .composer input::placeholder { color: var(--fg-faint); }
   .composer input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   .send-btn { width: 38px; height: 38px; border-radius: 50%; border: none; background: var(--accent); color: var(--accent-fg); cursor: pointer; flex: none; display: flex; align-items: center; justify-content: center; }
@@ -202,7 +204,7 @@ function shell(title: string, bodyHtml: string): string {
   .login-title { font-size: 21px; font-weight: 800; margin: 0; }
   .login-sub { font-size: 13.5px; color: var(--fg-muted); margin-top: 4px; }
   .field-label { font-size: 12.5px; font-weight: 600; color: var(--fg-muted); margin-bottom: 6px; display: block; }
-  .text-input { width: 100%; padding: 13px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--fg); font-size: 15px; }
+  .text-input { width: 100%; padding: 13px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--fg); font-size: 16px; }
   .text-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   .primary-btn { width: 100%; padding: 13px; border-radius: 10px; border: none; background: var(--accent); color: var(--accent-fg); font-size: 15px; font-weight: 800; cursor: pointer; }
   .login-foot { font-size: 12px; color: var(--fg-faint); text-align: center; }
@@ -228,7 +230,7 @@ function shell(title: string, bodyHtml: string): string {
   .prospect-contacted { font-size: 10.5px; font-weight: 700; color: var(--ok); background: var(--ok-wash); padding: 1px 7px; border-radius: 999px; display: inline-block; margin-top: 4px; }
   .select-all-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 13px; color: var(--fg-muted); }
   .select-all-row input { width: 16px; height: 16px; accent-color: var(--accent); }
-  .sticky-send-bar { position: sticky; bottom: 56px; background: var(--surface); border-top: 1px solid var(--border); padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px)); margin: 0 -16px -90px; }
+  .compose-bar { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-top: 14px; }
 </style>
 </head>
 <body>
@@ -584,7 +586,7 @@ dashboardRouter.get("/prospection", (req, res) => {
     ? prospects
         .map(
           (p) => `<label class="prospect-card">
-        <input type="checkbox" name="ids" value="${escapeHtml(p.id)}" form="send-form" />
+        <input type="checkbox" name="ids" value="${escapeHtml(p.id)}" checked />
         <div class="prospect-main">
           <div class="prospect-name">${escapeHtml(p.name)}</div>
           ${p.category || p.address ? `<div class="prospect-meta">${escapeHtml([p.category, p.address].filter(Boolean).join(" · "))}</div>` : ""}
@@ -619,30 +621,35 @@ dashboardRouter.get("/prospection", (req, res) => {
         </form>
 
         <h2 style="font-size:15px;margin:4px 0 10px">Prospects (${prospects.length})</h2>
-        ${
-          prospects.length
-            ? `<label class="select-all-row"><input type="checkbox" onchange="document.querySelectorAll('input[name=ids]').forEach(c=>c.checked=this.checked)" /> Tout cocher</label>`
-            : ""
-        }
-        ${prospectRows}
-      </div>
 
-      <form id="send-form" method="post" action="/dashboard/prospection/send">
-        <div class="sticky-send-bar">
+        <form method="post" action="/dashboard/prospection/send">
           ${
-            templates.length
-              ? `<select class="text-input" style="margin-bottom:8px" onchange="document.getElementById('prospection-text').value=this.value">
-                   <option value="">— Choisir un modèle —</option>
-                   ${templates.map((t) => `<option value="${escapeHtml(t.body)}">${escapeHtml(t.name)}</option>`).join("")}
-                 </select>`
+            prospects.length
+              ? `<label class="select-all-row"><input type="checkbox" checked onchange="this.form.querySelectorAll('input[name=ids]').forEach(c=>c.checked=this.checked)" /> Tout cocher</label>`
               : ""
           }
-          <div style="display:flex;gap:8px">
-            <input class="text-input" type="text" id="prospection-text" name="text" placeholder="Message à envoyer aux prospects cochés" required />
-            <button class="send-btn" type="submit" aria-label="Envoyer" style="width:auto;padding:0 16px">${ICONS.send}</button>
-          </div>
-        </div>
-      </form>
+          ${prospectRows}
+
+          ${
+            prospects.length
+              ? `<div class="compose-bar">
+                  ${
+                    templates.length
+                      ? `<select class="text-input" style="margin-bottom:8px" onchange="this.form.querySelector('[name=text]').value=this.value">
+                           <option value="">— Choisir un modèle —</option>
+                           ${templates.map((t) => `<option value="${escapeHtml(t.body)}">${escapeHtml(t.name)}</option>`).join("")}
+                         </select>`
+                      : ""
+                  }
+                  <div style="display:flex;gap:8px">
+                    <input class="text-input" type="text" name="text" placeholder="Message à envoyer aux prospects cochés" required />
+                    <button class="send-btn" type="submit" aria-label="Envoyer" style="width:auto;padding:0 16px">${ICONS.send}</button>
+                  </div>
+                </div>`
+              : ""
+          }
+        </form>
+      </div>
       ${tabbar("prospects")}`,
     ),
   );
