@@ -129,13 +129,32 @@ GOOGLE_PLACES_API_KEY=AIza...
 ### Usage
 
 1. Dans l'onglet **Prospects**, tapez une recherche (ex: "pharmacies", "epiceries", "restaurants Kaloum") et validez.
-2. Les etablissements trouves avec un numero de telephone sont ajoutes automatiquement a la liste (les doublons par numero sont ignores).
-3. Cochez les prospects a contacter (ou "Tout cocher"), choisissez eventuellement un modele de message, ecrivez/ajustez le texte, et envoyez.
-4. Les envois passent par les memes garde-fous anti-blocage que le reste (delai, limites par minute/jour) — un envoi en lot reste donc etale dans le temps, pas instantane.
+2. Les etablissements trouves avec un numero de telephone sont ajoutes automatiquement a la liste (les doublons par numero sont ignores) et classes dans l'une des 4 familles : **Pharmacies**, **Épiceries**, **Restaurants**, **Boutiques**.
+3. Utilisez les onglets en haut de la liste pour filtrer par famille — le message par defaut s'adapte a la famille selectionnee.
+4. Cochez les prospects a contacter (ou "Tout cocher"), choisissez eventuellement un modele, ecrivez/ajustez le texte (utilisez `{nom}` pour que chaque message mentionne le nom reel du commerce) et envoyez.
+5. Les envois passent par les memes garde-fous anti-blocage que le reste (delai, limites par minute/jour) — un envoi en lot reste donc etale dans le temps, pas instantane.
 
 Les prospects contactes restent dans la liste avec un badge "Contacte", pour eviter de redemarcher la meme entreprise par erreur.
 
 > Rappel : il s'agit de prospection a froid vers des inconnus — le risque de blocage du numero WhatsApp est plus eleve que pour les notifications transactionnelles. Dediez un numero specifique a cet usage si le volume devient important, et restez raisonnable sur la frequence.
+
+## Assistant IA (Google Gemini, optionnel)
+
+Avec une cle `GEMINI_API_KEY` (offre gratuite), le tableau de bord devient plus intelligent sans jamais envoyer de message tout seul — vous validez toujours manuellement :
+
+1. **Message de prospection par famille** : dans `/dashboard/prospection`, filtrez par famille (ex: Pharmacies) puis cliquez **"✨ Générer avec l'IA"** pour obtenir un brouillon court et personnalisable (`{nom}`), adapte a ce type de commerce. Sans cle configuree, des modeles par defaut raisonnables sont deja utilises automatiquement.
+2. **Suggestion de reponse** : quand un prospect ou client repond sur WhatsApp, un brouillon de reponse est genere automatiquement et affiche au-dessus de la zone de reponse dans `/dashboard/chat/...` (encadre "💡 Brouillon suggéré par l'IA"). Il pre-remplit le champ de message mais **n'envoie jamais rien automatiquement** — vous relisez, modifiez si besoin, et cliquez Envoyer vous-meme.
+
+### Creer la cle (gratuite)
+
+1. Allez sur [aistudio.google.com/apikey](https://aistudio.google.com/apikey), connectez-vous avec un compte Google.
+2. Cliquez **Create API key**, copiez la cle (commence par `AIza...`).
+3. Ajoutez dans `.env` (ou les variables d'environnement EasyPanel) :
+```
+GEMINI_API_KEY=AIza...
+```
+
+Laissez la variable vide pour desactiver completement l'IA : le reste du tableau de bord (envoi manuel, prospection avec modeles par defaut, journal) continue de fonctionner normalement.
 
 ## Migrer vers l'API officielle WhatsApp Business (Meta Cloud API)
 

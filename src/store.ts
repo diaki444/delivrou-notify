@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { classifyCategory, type ProspectCategory } from "./categories.js";
 
 /**
  * Stockage leger des conversations et du journal d'envoi, persiste dans un
@@ -48,6 +49,7 @@ export interface Prospect {
   phone: string; // chiffres uniquement
   address?: string;
   category?: string;
+  bucket: ProspectCategory; // famille (pharmacie, epicerie, restaurant, boutique)
   query: string; // recherche d'origine
   addedAt: number;
   contacted: boolean;
@@ -65,6 +67,7 @@ interface DiskShape {
   sendLog: SendLogEntry[];
   templates: MessageTemplate[];
   prospects: Prospect[];
+  suggestedReplies: Record<string, string>;
 }
 
 let chats = new Map<string, ChatMeta>();
@@ -72,6 +75,7 @@ let messages = new Map<string, StoredMessage[]>();
 let sendLog: SendLogEntry[] = [];
 let templates: MessageTemplate[] = [];
 let prospects: Prospect[] = [];
+let suggestedReplies = new Map<string, string>();
 
 function load() {
   try {
@@ -82,7 +86,12 @@ function load() {
     messages = new Map(Object.entries(parsed.messages || {}));
     sendLog = parsed.sendLog || [];
     templates = parsed.templates || [];
-    prospects = parsed.prospects || [];
+    // Les prospects sauvegardes avant l'ajout des familles n'ont pas de `bucket` : on le deduit a la volee.
+    prospects = (parsed.prospects || []).map((p) => ({
+      ...p,
+      bucket: p.bucket || classifyCategory(p.category, p.query),
+    }));
+    suggestedReplies = new Map(Object.entries(parsed.suggestedReplies || {}));
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error("[delivrou-notify] Impossible de charger l'historique sauvegarde:", err);
@@ -102,6 +111,7 @@ function scheduleSave() {
         sendLog,
         templates,
         prospects,
+        suggestedReplies: Object.fromEntries(suggestedReplies),
       };
       fs.writeFileSync(DATA_FILE, JSON.stringify(shape), "utf8");
     } catch (err) {
@@ -183,8 +193,16 @@ export function deleteTemplate(id: string) {
   scheduleSave();
 }
 
-export function listProspects(limit = 300): Prospect[] {
-  return [...prospects].sort((a, b) => b.addedAt - a.addedAt).slice(0, limit);
+export function listProspects(limit = 300, bucket?: ProspectCategory): Prospect[] {
+  const filtered = bucket ? prospects.filter((p) => p.bucket === bucket) : prospects;
+  return [...filtered].sort((a, b) => b.addedAt - a.addedAt).slice(0, limit);
+}
+
+/** Nombre de prospects par famille, pour les compteurs des onglets de filtre. */
+export function countProspectsByBucket(): Record<ProspectCategory, number> {
+  const counts: Record<ProspectCategory, number> = { pharmacie: 0, epicerie: 0, restaurant: 0, boutique: 0 };
+  for (const p of prospects) counts[p.bucket]++;
+  return counts;
 }
 
 export function getProspect(id: string): Prospect | undefined {
@@ -210,6 +228,7 @@ export function addProspects(
       phone: f.phone,
       address: f.address,
       category: f.category,
+      bucket: classifyCategory(f.category, query),
       query,
       addedAt: Date.now(),
       contacted: false,
@@ -230,4 +249,21 @@ export function markProspectContacted(id: string) {
 export function deleteProspect(id: string) {
   prospects = prospects.filter((p) => p.id !== id);
   scheduleSave();
+}
+
+/**
+ * Brouillon de reponse suggere par l'IA pour une conversation donnee
+ * (jamais envoye automatiquement : l'utilisateur le relit et confirme).
+ */
+export function getSuggestedReply(jid: string): string | undefined {
+  return suggestedReplies.get(jid);
+}
+
+export function setSuggestedReply(jid: string, text: string) {
+  suggestedReplies.set(jid, text);
+  scheduleSave();
+}
+
+export function clearSuggestedReply(jid: string) {
+  if (suggestedReplies.delete(jid)) scheduleSave();
 }

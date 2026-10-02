@@ -13,9 +13,14 @@ import {
   addProspects,
   markProspectContacted,
   deleteProspect,
+  countProspectsByBucket,
+  getSuggestedReply,
+  clearSuggestedReply,
 } from "./store.js";
 import { sendWithGuards, queueLength } from "./send-queue.js";
 import { searchPlaces, phoneToDigits, isPlacesConfigured } from "./places.js";
+import { CATEGORY_ORDER, CATEGORY_LABELS, DEFAULT_TEMPLATES, personalizeMessage, type ProspectCategory } from "./categories.js";
+import { isGeminiConfigured, generateProspectMessage } from "./gemini.js";
 import {
   isDashboardConfigured,
   checkPassword,
@@ -231,6 +236,10 @@ function shell(title: string, bodyHtml: string): string {
   .select-all-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 13px; color: var(--fg-muted); }
   .select-all-row input { width: 16px; height: 16px; accent-color: var(--accent); }
   .compose-bar { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-top: 14px; }
+  .ai-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .ai-btn { flex: none; font-size: 12.5px; font-weight: 700; padding: 8px 12px; border-radius: 9px; border: 1px solid var(--accent); background: var(--accent-wash, transparent); color: var(--accent); cursor: pointer; white-space: nowrap; }
+  .ai-suggestion { background: var(--accent-wash, var(--surface-2)); border: 1px dashed var(--accent); border-radius: 10px; padding: 10px 12px; margin: 8px 14px; font-size: 13px; color: var(--fg); }
+  .ai-suggestion-label { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent); margin-bottom: 4px; }
 </style>
 </head>
 <body>
@@ -401,6 +410,7 @@ dashboardRouter.get("/chat/:jid", (req, res) => {
   const chat = getChat(jid);
   const msgs = getMessages(jid, 150);
   const name = chat?.name || jid;
+  const suggestion = getSuggestedReply(jid);
 
   let lastDay = "";
   const bubbles = msgs
@@ -426,9 +436,17 @@ dashboardRouter.get("/chat/:jid", (req, res) => {
       <div class="messages">
         ${bubbles || `<div class="empty">Aucun message enregistre pour cette conversation.</div>`}
       </div>
+      ${
+        suggestion
+          ? `<div class="ai-suggestion">
+              <div class="ai-suggestion-label">💡 Brouillon suggéré par l'IA — à relire avant d'envoyer</div>
+              ${escapeHtml(suggestion)}
+            </div>`
+          : ""
+      }
       <form class="composer" method="post" action="/dashboard/send">
         <input type="hidden" name="jid" value="${escapeHtml(jid)}" />
-        <input type="text" name="text" placeholder="Répondre..." required />
+        <input type="text" name="text" placeholder="Répondre..." value="${escapeHtml(suggestion || "")}" required />
         <button class="send-btn" type="submit" aria-label="Envoyer">${ICONS.send}</button>
       </form>`,
     ),
@@ -448,6 +466,7 @@ dashboardRouter.post("/send", async (req, res) => {
   }
 
   await sendWithGuards(phone, text, "manual");
+  if (jid) clearSuggestedReply(jid);
   res.redirect(jid ? `/dashboard/chat/${encodeURIComponent(jid)}` : "/dashboard");
 });
 
@@ -566,12 +585,18 @@ dashboardRouter.post("/templates/:id/delete", (req, res) => {
 });
 
 dashboardRouter.get("/prospection", (req, res) => {
-  const prospects = listProspects(300);
+  const catParam = String(req.query.cat || "");
+  const cat = (CATEGORY_ORDER as string[]).includes(catParam) ? (catParam as ProspectCategory) : undefined;
+  const prospects = listProspects(300, cat);
   const templates = listTemplates();
+  const counts = countProspectsByBucket();
+  const totalCount = counts.pharmacie + counts.epicerie + counts.restaurant + counts.boutique;
 
   let banner = "";
   if (req.query.searchError) {
     banner = `<div class="err-banner">${escapeHtml(String(req.query.searchError))}</div>`;
+  } else if (req.query.genError) {
+    banner = `<div class="err-banner">Suggestion IA indisponible : ${escapeHtml(String(req.query.genError))}</div>`;
   } else if (req.query.added !== undefined) {
     const added = Number(req.query.added) || 0;
     const dup = Number(req.query.dup) || 0;
@@ -596,7 +621,20 @@ dashboardRouter.get("/prospection", (req, res) => {
       </label>`,
         )
         .join("")
-    : `<div class="empty">Aucun prospect pour le moment. Cherchez ci-dessus (ex: "pharmacies", "épiceries", "restaurants") pour en ajouter automatiquement.</div>`;
+    : `<div class="empty">Aucun prospect ${cat ? `dans « ${escapeHtml(CATEGORY_LABELS[cat])} »` : ""} pour le moment. Cherchez ci-dessus (ex: "pharmacies", "épiceries", "restaurants") pour en ajouter automatiquement.</div>`;
+
+  const draft = typeof req.query.draft === "string" ? req.query.draft : undefined;
+  const defaultText = draft ?? (cat ? DEFAULT_TEMPLATES[cat] : "");
+  const sendAction = `/dashboard/prospection/send${cat ? `?cat=${cat}` : ""}`;
+  const genAction = `/dashboard/prospection/generate-message${cat ? `?cat=${cat}` : ""}`;
+
+  const catTabs = [
+    `<a class="filter-pill ${!cat ? "is-active" : ""}" href="/dashboard/prospection">Toutes (${totalCount})</a>`,
+    ...CATEGORY_ORDER.map(
+      (c) =>
+        `<a class="filter-pill ${cat === c ? "is-active" : ""}" href="/dashboard/prospection?cat=${c}">${CATEGORY_LABELS[c]} (${counts[c]})</a>`,
+    ),
+  ].join("");
 
   res.send(
     shell(
@@ -608,7 +646,7 @@ dashboardRouter.get("/prospection", (req, res) => {
           <a class="topbar-avatar" href="/dashboard/templates">A</a>
         </div>
       </div>
-      <div class="page-pad">
+      <div class="page-pad" style="padding-bottom:0">
         ${banner}
         ${
           !isPlacesConfigured()
@@ -619,10 +657,12 @@ dashboardRouter.get("/prospection", (req, res) => {
           <input class="text-input" type="text" name="query" placeholder="Ex: pharmacies, épiceries, restaurants..." required />
           <button class="primary-btn" type="submit" style="width:auto;white-space:nowrap">${ICONS.search}</button>
         </form>
-
+      </div>
+      <div class="filters">${catTabs}</div>
+      <div class="page-pad" style="padding-top:0">
         <h2 style="font-size:15px;margin:4px 0 10px">Prospects (${prospects.length})</h2>
 
-        <form method="post" action="/dashboard/prospection/send">
+        <form method="post" action="${sendAction}">
           ${
             prospects.length
               ? `<label class="select-all-row"><input type="checkbox" checked onchange="this.form.querySelectorAll('input[name=ids]').forEach(c=>c.checked=this.checked)" /> Tout cocher</label>`
@@ -633,18 +673,26 @@ dashboardRouter.get("/prospection", (req, res) => {
           ${
             prospects.length
               ? `<div class="compose-bar">
-                  ${
-                    templates.length
-                      ? `<select class="text-input" style="margin-bottom:8px" onchange="this.form.querySelector('[name=text]').value=this.value">
-                           <option value="">— Choisir un modèle —</option>
-                           ${templates.map((t) => `<option value="${escapeHtml(t.body)}">${escapeHtml(t.name)}</option>`).join("")}
-                         </select>`
-                      : ""
-                  }
+                  <div class="ai-row">
+                    ${
+                      templates.length
+                        ? `<select class="text-input" style="flex:1" onchange="this.form.querySelector('[name=text]').value=this.value">
+                             <option value="">— Choisir un modèle —</option>
+                             ${templates.map((t) => `<option value="${escapeHtml(t.body)}">${escapeHtml(t.name)}</option>`).join("")}
+                           </select>`
+                        : ""
+                    }
+                    ${
+                      cat && isGeminiConfigured()
+                        ? `<button class="ai-btn" type="submit" formaction="${genAction}" formmethod="get">✨ Générer avec l'IA</button>`
+                        : ""
+                    }
+                  </div>
                   <div style="display:flex;gap:8px">
-                    <input class="text-input" type="text" name="text" placeholder="Message à envoyer aux prospects cochés" required />
+                    <input class="text-input" type="text" name="text" placeholder="Message (utilisez {nom} pour personnaliser)" value="${escapeHtml(defaultText)}" required />
                     <button class="send-btn" type="submit" aria-label="Envoyer" style="width:auto;padding:0 16px">${ICONS.send}</button>
                   </div>
+                  <div style="font-size:11.5px;color:var(--fg-muted);margin-top:6px">{nom} est remplacé par le nom de chaque commerce avant l'envoi.</div>
                 </div>`
               : ""
           }
@@ -653,6 +701,21 @@ dashboardRouter.get("/prospection", (req, res) => {
       ${tabbar("prospects")}`,
     ),
   );
+});
+
+dashboardRouter.get("/prospection/generate-message", async (req, res) => {
+  const catParam = String(req.query.cat || "");
+  const cat = (CATEGORY_ORDER as string[]).includes(catParam) ? (catParam as ProspectCategory) : undefined;
+  if (!cat) {
+    res.redirect("/dashboard/prospection");
+    return;
+  }
+  const result = await generateProspectMessage(CATEGORY_LABELS[cat]);
+  if (!result.ok || !result.text) {
+    res.redirect(`/dashboard/prospection?cat=${cat}&genError=${encodeURIComponent(result.error || "Erreur inconnue")}`);
+    return;
+  }
+  res.redirect(`/dashboard/prospection?cat=${cat}&draft=${encodeURIComponent(result.text)}`);
 });
 
 dashboardRouter.post("/prospection/search", async (req, res) => {
@@ -683,9 +746,12 @@ dashboardRouter.post("/prospection/send", async (req, res) => {
   const text = String(req.body?.text || "").trim();
   const rawIds = req.body?.ids;
   const ids = Array.isArray(rawIds) ? rawIds.map(String) : rawIds ? [String(rawIds)] : [];
+  const catParam = String(req.query.cat || "");
+  const cat = (CATEGORY_ORDER as string[]).includes(catParam) ? catParam : undefined;
+  const catSuffix = cat ? `&cat=${cat}` : "";
 
   if (!text || ids.length === 0) {
-    res.redirect("/dashboard/prospection");
+    res.redirect(`/dashboard/prospection?${cat ? `cat=${cat}` : ""}`);
     return;
   }
 
@@ -695,7 +761,8 @@ dashboardRouter.post("/prospection/send", async (req, res) => {
     const prospects = listProspects(1000);
     const p = prospects.find((x) => x.id === id);
     if (!p) continue;
-    const result = await sendWithGuards(p.phone, text, "manual");
+    const personalized = personalizeMessage(text, p.name);
+    const result = await sendWithGuards(p.phone, personalized, "manual");
     if (result.ok) {
       markProspectContacted(id);
       sent++;
@@ -704,7 +771,7 @@ dashboardRouter.post("/prospection/send", async (req, res) => {
     }
   }
 
-  res.redirect(`/dashboard/prospection?sent=${sent}&failed=${failed}`);
+  res.redirect(`/dashboard/prospection?sent=${sent}&failed=${failed}${catSuffix}`);
 });
 
 dashboardRouter.post("/prospection/:id/delete", (req, res) => {

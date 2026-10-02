@@ -10,7 +10,8 @@ import makeWASocket, {
   type WASocket,
   type proto,
 } from "@whiskeysockets/baileys";
-import { recordMessage, upsertChat } from "./store.js";
+import { recordMessage, upsertChat, getMessages, getChat, setSuggestedReply } from "./store.js";
+import { isGeminiConfigured, suggestReply } from "./gemini.js";
 
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
 
@@ -116,16 +117,34 @@ class WhatsAppClient {
     const senderJid = m.key.participant || jid;
     const senderName = this.contactNames.get(senderJid) || m.pushName || undefined;
 
+    const fromMe = Boolean(m.key.fromMe);
     recordMessage({
       id: m.key.id ?? `${Date.now()}`,
       chatJid: jid,
-      fromMe: Boolean(m.key.fromMe),
+      fromMe,
       senderName,
       text,
       timestamp:
         (typeof m.messageTimestamp === "number" ? m.messageTimestamp : Number(m.messageTimestamp ?? 0)) * 1000 ||
         Date.now(),
     });
+
+    if (!fromMe && isGeminiConfigured()) {
+      void this.generateReplySuggestion(jid);
+    }
+  }
+
+  /** Propose un brouillon de reponse via l'IA ; ne l'envoie jamais, seulement le pre-remplit dans le tableau de bord. */
+  private async generateReplySuggestion(jid: string) {
+    try {
+      const history = getMessages(jid, 8).map((m) => ({ fromMe: m.fromMe, text: m.text }));
+      const name = getChat(jid)?.name;
+      const result = await suggestReply(history, name);
+      if (result.ok && result.text) setSuggestedReply(jid, result.text);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[delivrou-notify] Suggestion IA impossible:", err);
+    }
   }
 
   async numberHasWhatsApp(phoneDigits: string): Promise<boolean> {
