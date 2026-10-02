@@ -16,6 +16,7 @@ import {
   countProspectsByBucket,
   getSuggestedReply,
   clearSuggestedReply,
+  findProspectByPhone,
 } from "./store.js";
 import { sendWithGuards, queueLength } from "./send-queue.js";
 import { searchPlaces, phoneToDigits, isPlacesConfigured } from "./places.js";
@@ -128,6 +129,7 @@ function shell(
     .chat-header .back-btn, .topbar .back-btn { display: none !important; }
     .list, .log-list { padding-bottom: 14px !important; }
     .page-pad { padding-bottom: 14px !important; }
+    .page-scroll { flex: 1; overflow-y: auto; min-height: 0; }
     .fab { bottom: 20px !important; }
   }
 
@@ -269,12 +271,15 @@ function shell(
   .search-form-row { display: flex; gap: 8px; margin-bottom: 14px; }
   .search-form-row input { flex: 1; }
   .prospect-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 11px 13px; margin-bottom: 8px; display: flex; gap: 10px; align-items: flex-start; }
-  .prospect-card input[type=checkbox] { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--accent); flex: none; }
-  .prospect-main { flex: 1; min-width: 0; }
+  .prospect-check { flex: none; display: flex; padding-top: 2px; }
+  .prospect-check input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
+  .prospect-main { flex: 1; min-width: 0; text-decoration: none; color: inherit; display: block; }
   .prospect-name { font-weight: 700; font-size: 14px; }
   .prospect-meta { font-size: 12.5px; color: var(--fg-muted); margin-top: 2px; }
   .prospect-phone { font-size: 12.5px; color: var(--fg); margin-top: 2px; font-variant-numeric: tabular-nums; }
   .prospect-contacted { font-size: 10.5px; font-weight: 700; color: var(--ok); background: var(--ok-wash); padding: 1px 7px; border-radius: 999px; display: inline-block; margin-top: 4px; }
+  .prospect-open { flex: none; width: 30px; height: 30px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--border); color: var(--accent); display: flex; align-items: center; justify-content: center; text-decoration: none; }
+  .prospect-open svg { width: 15px; height: 15px; }
   .select-all-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 13px; color: var(--fg-muted); }
   .select-all-row input { width: 16px; height: 16px; accent-color: var(--accent); }
   .compose-bar { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-top: 14px; }
@@ -459,7 +464,7 @@ dashboardRouter.get("/compose", (_req, res) => {
         <a class="back-btn" href="/dashboard" aria-label="Retour">${ICONS.back}</a>
         <div class="chat-header-id"><div class="chat-header-name">Nouveau message</div></div>
       </div>
-      <div class="page-pad">
+      <div class="page-pad page-scroll">
         <form method="post" action="/dashboard/send">
           <label class="field-label" for="phone">Numero (avec indicatif pays, chiffres uniquement)</label>
           <input class="text-input" type="text" id="phone" name="phone" placeholder="224612345678" required style="margin-bottom:14px" />
@@ -489,7 +494,8 @@ dashboardRouter.get("/chat/:jid", (req, res) => {
   const jid = req.params.jid;
   const chat = getChat(jid);
   const msgs = getMessages(jid, 150);
-  const name = chat?.name || jid;
+  const prospect = !chat?.name ? findProspectByPhone(jid.split("@")[0]) : undefined;
+  const name = chat?.name || prospect?.name || jid;
   const suggestion = getSuggestedReply(jid);
 
   let lastDay = "";
@@ -623,7 +629,7 @@ dashboardRouter.get("/templates", (_req, res) => {
         <a class="back-btn" href="/dashboard" aria-label="Retour">${ICONS.back}</a>
         <div class="chat-header-id"><div class="chat-header-name">Modèles de message</div></div>
       </div>
-      <div class="page-pad">
+      <div class="page-pad page-scroll">
         ${
           templates.length
             ? templates
@@ -693,17 +699,19 @@ dashboardRouter.get("/prospection", (req, res) => {
 
   const prospectRows = prospects.length
     ? prospects
-        .map(
-          (p) => `<label class="prospect-card">
-        <input type="checkbox" name="ids" value="${escapeHtml(p.id)}" checked />
-        <div class="prospect-main">
+        .map((p) => {
+          const jid = `${p.phone}@s.whatsapp.net`;
+          return `<div class="prospect-card">
+        <label class="prospect-check"><input type="checkbox" name="ids" value="${escapeHtml(p.id)}" checked /></label>
+        <a class="prospect-main" href="/dashboard/chat/${encodeURIComponent(jid)}">
           <div class="prospect-name">${escapeHtml(p.name)}</div>
           ${p.category || p.address ? `<div class="prospect-meta">${escapeHtml([p.category, p.address].filter(Boolean).join(" · "))}</div>` : ""}
           <div class="prospect-phone">${escapeHtml(p.phone)}</div>
           ${p.contacted ? `<span class="prospect-contacted">Contacté</span>` : ""}
-        </div>
-      </label>`,
-        )
+        </a>
+        <a class="prospect-open" href="/dashboard/chat/${encodeURIComponent(jid)}" aria-label="Ouvrir la discussion">${ICONS.chats}</a>
+      </div>`;
+        })
         .join("")
     : `<div class="empty">Aucun prospect ${cat ? `dans « ${escapeHtml(CATEGORY_LABELS[cat])} »` : ""} pour le moment. Cherchez ci-dessus (ex: "pharmacies", "épiceries", "restaurants") pour en ajouter automatiquement.</div>`;
 
@@ -743,7 +751,7 @@ dashboardRouter.get("/prospection", (req, res) => {
         </form>
       </div>
       <div class="filters">${catTabs}</div>
-      <div class="page-pad" style="padding-top:0">
+      <div class="page-pad page-scroll" style="padding-top:0">
         <h2 style="font-size:15px;margin:4px 0 10px">Prospects (${prospects.length})</h2>
 
         <form method="post" action="${sendAction}">
@@ -767,7 +775,7 @@ dashboardRouter.get("/prospection", (req, res) => {
                         : ""
                     }
                     ${
-                      cat && isGeminiConfigured()
+                      isGeminiConfigured()
                         ? `<button class="ai-btn" type="submit" formaction="${genAction}" formmethod="get">✨ Générer avec l'IA</button>`
                         : ""
                     }
@@ -791,16 +799,15 @@ dashboardRouter.get("/prospection", (req, res) => {
 dashboardRouter.get("/prospection/generate-message", async (req, res) => {
   const catParam = String(req.query.cat || "");
   const cat = (CATEGORY_ORDER as string[]).includes(catParam) ? (catParam as ProspectCategory) : undefined;
-  if (!cat) {
-    res.redirect("/dashboard/prospection");
-    return;
-  }
-  const result = await generateProspectMessage(CATEGORY_LABELS[cat]);
+  const label = cat ? CATEGORY_LABELS[cat] : "commerces locaux (tous types confondus)";
+  const catSuffix = cat ? `cat=${cat}&` : "";
+
+  const result = await generateProspectMessage(label);
   if (!result.ok || !result.text) {
-    res.redirect(`/dashboard/prospection?cat=${cat}&genError=${encodeURIComponent(result.error || "Erreur inconnue")}`);
+    res.redirect(`/dashboard/prospection?${catSuffix}genError=${encodeURIComponent(result.error || "Erreur inconnue")}`);
     return;
   }
-  res.redirect(`/dashboard/prospection?cat=${cat}&draft=${encodeURIComponent(result.text)}`);
+  res.redirect(`/dashboard/prospection?${catSuffix}draft=${encodeURIComponent(result.text)}`);
 });
 
 dashboardRouter.post("/prospection/search", async (req, res) => {

@@ -10,8 +10,9 @@ import makeWASocket, {
   type WASocket,
   type proto,
 } from "@whiskeysockets/baileys";
-import { recordMessage, upsertChat, getMessages, getChat, setSuggestedReply } from "./store.js";
+import { recordMessage, upsertChat, getMessages, getChat, setSuggestedReply, findProspectByPhone } from "./store.js";
 import { isGeminiConfigured, suggestReply } from "./gemini.js";
+import { CATEGORY_LABELS } from "./categories.js";
 
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
 
@@ -139,7 +140,15 @@ class WhatsAppClient {
     try {
       const history = getMessages(jid, 8).map((m) => ({ fromMe: m.fromMe, text: m.text }));
       const name = getChat(jid)?.name;
-      const result = await suggestReply(history, name);
+      const phone = jid.split("@")[0];
+      const prospect = findProspectByPhone(phone);
+      const result = await suggestReply(
+        history,
+        name,
+        prospect
+          ? { isProspect: true, bucketLabel: CATEGORY_LABELS[prospect.bucket], contacted: prospect.contacted }
+          : { isProspect: false },
+      );
       if (result.ok && result.text) setSuggestedReply(jid, result.text);
     } catch (err) {
       // eslint-disable-next-line no-console

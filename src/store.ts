@@ -209,6 +209,10 @@ export function getProspect(id: string): Prospect | undefined {
   return prospects.find((p) => p.id === id);
 }
 
+export function findProspectByPhone(phone: string): Prospect | undefined {
+  return prospects.find((p) => p.phone === phone);
+}
+
 /** Ajoute des prospects trouves par une recherche, en evitant les doublons par numero. */
 export function addProspects(
   query: string,
