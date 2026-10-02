@@ -67,7 +67,13 @@ const ICONS = {
 };
 
 /** Coquille HTML commune (tokens, styles) partagee par toutes les pages du tableau de bord. */
-function shell(title: string, bodyHtml: string): string {
+function shell(
+  title: string,
+  bodyHtml: string,
+  active?: "chats" | "logs" | "prospects",
+  activeJid?: string,
+): string {
+  const sidebarHtml = active ? desktopSidebar(active, activeJid) : "";
   return `<!doctype html>
 <html lang="fr">
 <head>
@@ -105,15 +111,43 @@ function shell(title: string, bodyHtml: string): string {
   html, body { height: 100%; }
   body { margin: 0; background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
   a { color: inherit; }
+  .shell { display: block; min-height: 100%; }
   .app { max-width: 480px; margin: 0 auto; min-height: 100%; display: flex; flex-direction: column; position: relative; }
+  .desktop-sidebar { display: none; }
 
   /* Version bureau : l'appli reste pensee mobile-first, mais sur grand ecran
-     elle s'affiche en fenetre centree (comme WhatsApp Web) au lieu d'etirer
-     une colonne etroite dans tout l'ecran. */
+     elle s'affiche comme une vraie appli de bureau (type Slack/ClickUp) :
+     une colonne de navigation a gauche + le contenu a droite, au lieu
+     d'etirer une colonne mobile etroite dans tout l'ecran. */
   @media (min-width: 860px) {
     body { display: flex; align-items: center; justify-content: center; background: #050302; padding: 24px; }
-    .app { width: 440px; max-width: 440px; height: min(860px, 94vh); min-height: 0; margin: 0; border-radius: 22px; overflow: hidden; box-shadow: 0 40px 100px rgba(0,0,0,.65), 0 0 0 1px var(--border); }
+    .shell { display: flex; width: min(1040px, 94vw); height: min(860px, 94vh); min-height: 0; margin: 0; border-radius: 16px; overflow: hidden; box-shadow: 0 40px 100px rgba(0,0,0,.65), 0 0 0 1px var(--border); background: var(--bg); }
+    .desktop-sidebar { display: flex; flex-direction: column; width: 272px; flex: none; background: #160d09; border-right: 1px solid var(--border); overflow-y: auto; }
+    .app { max-width: none; width: auto; margin: 0; flex: 1; min-width: 0; min-height: 0; height: 100%; }
+    .tabbar { display: none !important; }
+    .chat-header .back-btn, .topbar .back-btn { display: none !important; }
+    .list, .log-list { padding-bottom: 14px !important; }
+    .page-pad { padding-bottom: 14px !important; }
+    .fab { bottom: 20px !important; }
   }
+
+  .ds-head { padding: 16px 16px 12px; display: flex; align-items: center; gap: 10px; }
+  .ds-mark { width: 32px; height: 32px; border-radius: 9px; background: linear-gradient(165deg, var(--header-2), var(--header)); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12.5px; color: var(--header-fg); flex: none; }
+  .ds-title { font-weight: 800; font-size: 15px; }
+  .ds-search { margin: 0 14px 14px; padding: 8px 11px; border-radius: 8px; background: rgba(255,255,255,.06); border: 1px solid var(--border); color: var(--fg-faint); font-size: 13px; display: flex; align-items: center; gap: 8px; }
+  .ds-search svg { width: 14px; height: 14px; opacity: .7; flex: none; }
+  .ds-nav { padding: 0 8px; margin-bottom: 12px; }
+  .ds-nav a { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 7px; font-size: 13.5px; font-weight: 600; color: var(--fg-muted); text-decoration: none; }
+  .ds-nav a svg { width: 17px; height: 17px; flex: none; }
+  .ds-nav a.is-active { background: var(--accent-wash); color: var(--accent); }
+  .ds-section { padding: 10px 16px 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-faint); }
+  .ds-chats { flex: 1; overflow-y: auto; padding-bottom: 10px; }
+  .ds-chat { display: flex; align-items: center; gap: 9px; padding: 7px 14px; text-decoration: none; color: var(--fg-muted); font-size: 13.5px; }
+  .ds-chat:hover { background: rgba(255,255,255,.04); }
+  .ds-chat.is-active { background: var(--surface); color: var(--fg); font-weight: 700; }
+  .ds-chat .avatar { width: 24px; height: 24px; font-size: 10px; flex: none; }
+  .ds-chat span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ds-empty { padding: 10px 16px; font-size: 12.5px; color: var(--fg-faint); }
 
   .topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: linear-gradient(165deg, var(--header-2), var(--header)); padding: 10px 14px 16px; }
   .topbar-row { display: flex; align-items: center; gap: 10px; }
@@ -251,11 +285,47 @@ function shell(title: string, bodyHtml: string): string {
 </style>
 </head>
 <body>
+<div class="shell">
+${sidebarHtml}
 <div class="app">
 ${bodyHtml}
 </div>
+</div>
 </body>
 </html>`;
+}
+
+/** Barre laterale visible uniquement en version bureau (type Slack) : navigation + liste des conversations. */
+function desktopSidebar(active: "chats" | "logs" | "prospects", activeJid?: string): string {
+  const navItem = (key: "chats" | "logs" | "prospects", href: string, icon: string, label: string) =>
+    `<a class="${active === key ? "is-active" : ""}" href="${href}">${icon}${label}</a>`;
+
+  const chats = listChats(100);
+  const chatRows = chats.length
+    ? chats
+        .map(
+          (c) => `<a class="ds-chat ${activeJid === c.jid ? "is-active" : ""}" href="/dashboard/chat/${encodeURIComponent(c.jid)}">
+        <div class="avatar ${c.isGroup ? "group" : ""}">${escapeHtml(initials(c.name))}</div>
+        <span>${escapeHtml(c.name)}</span>
+      </a>`,
+        )
+        .join("")
+    : `<div class="ds-empty">Aucune conversation pour le moment.</div>`;
+
+  return `<aside class="desktop-sidebar">
+    <div class="ds-head">
+      <div class="ds-mark">DN</div>
+      <div class="ds-title">Delivrou Notify</div>
+    </div>
+    <a class="ds-search" href="/dashboard">${ICONS.search}Rechercher...</a>
+    <nav class="ds-nav">
+      ${navItem("chats", "/dashboard", ICONS.chats, "Conversations")}
+      ${navItem("prospects", "/dashboard/prospection", ICONS.prospects, "Prospects")}
+      ${navItem("logs", "/dashboard/logs", ICONS.log, "Journal")}
+    </nav>
+    <div class="ds-section">Conversations</div>
+    <div class="ds-chats">${chatRows}</div>
+  </aside>`;
 }
 
 function tabbar(active: "chats" | "logs" | "prospects"): string {
@@ -375,6 +445,7 @@ dashboardRouter.get("/", (req, res) => {
         <a class="fab" href="/dashboard/compose" aria-label="Nouveau message">${ICONS.plus}</a>
       </div>
       ${tabbar("chats")}`,
+      "chats",
     ),
   );
 });
@@ -409,6 +480,7 @@ dashboardRouter.get("/compose", (_req, res) => {
           <button class="primary-btn" type="submit">Envoyer</button>
         </form>
       </div>`,
+      "chats",
     ),
   );
 });
@@ -457,6 +529,8 @@ dashboardRouter.get("/chat/:jid", (req, res) => {
         <input type="text" name="text" placeholder="Répondre..." value="${escapeHtml(suggestion || "")}" required />
         <button class="send-btn" type="submit" aria-label="Envoyer">${ICONS.send}</button>
       </form>`,
+      "chats",
+      jid,
     ),
   );
 });
@@ -535,6 +609,7 @@ dashboardRouter.get("/logs", (req, res) => {
         ${rows || `<div class="empty">Aucun envoi pour ce filtre.</div>`}
       </div>
       ${tabbar("logs")}`,
+      "logs",
     ),
   );
 });
@@ -576,6 +651,7 @@ dashboardRouter.get("/templates", (_req, res) => {
           <button class="primary-btn" type="submit">Enregistrer le modèle</button>
         </form>
       </div>`,
+      "chats",
     ),
   );
 });
@@ -707,6 +783,7 @@ dashboardRouter.get("/prospection", (req, res) => {
         </form>
       </div>
       ${tabbar("prospects")}`,
+      "prospects",
     ),
   );
 });
