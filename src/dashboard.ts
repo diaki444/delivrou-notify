@@ -107,6 +107,14 @@ function shell(title: string, bodyHtml: string): string {
   a { color: inherit; }
   .app { max-width: 480px; margin: 0 auto; min-height: 100%; display: flex; flex-direction: column; position: relative; }
 
+  /* Version bureau : l'appli reste pensee mobile-first, mais sur grand ecran
+     elle s'affiche en fenetre centree (comme WhatsApp Web) au lieu d'etirer
+     une colonne etroite dans tout l'ecran. */
+  @media (min-width: 860px) {
+    body { display: flex; align-items: center; justify-content: center; background: #050302; padding: 24px; }
+    .app { width: 440px; max-width: 440px; height: min(860px, 94vh); min-height: 0; margin: 0; border-radius: 22px; overflow: hidden; box-shadow: 0 40px 100px rgba(0,0,0,.65), 0 0 0 1px var(--border); }
+  }
+
   .topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: linear-gradient(165deg, var(--header-2), var(--header)); padding: 10px 14px 16px; }
   .topbar-row { display: flex; align-items: center; gap: 10px; }
   .topbar-mark { width: 30px; height: 30px; border-radius: 8px; background: rgba(0,0,0,.32); color: var(--header-fg); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px; flex: none; }
