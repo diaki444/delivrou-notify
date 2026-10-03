@@ -149,10 +149,18 @@ app.listen(PORT, () => {
   console.log(`[delivrou-notify] API HTTP demarree sur le port ${PORT}`);
 });
 
-void whatsapp.connect().catch((err) => {
+if (process.env.WHATSAPP_DISABLED === "true") {
   // eslint-disable-next-line no-console
-  console.error("[delivrou-notify] Erreur de connexion WhatsApp:", err);
-});
+  console.error(
+    "[delivrou-notify] WHATSAPP_DISABLED=true : connexion WhatsApp desactivee volontairement. " +
+      "Le tableau de bord reste accessible mais aucun message ne peut etre envoye ou recu.",
+  );
+} else {
+  void whatsapp.connect().catch((err) => {
+    // eslint-disable-next-line no-console
+    console.error("[delivrou-notify] Erreur de connexion WhatsApp:", err);
+  });
+}
 
 process.on("SIGTERM", () => process.exit(0));
 process.on("SIGINT", () => process.exit(0));

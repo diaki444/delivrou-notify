@@ -37,6 +37,12 @@ export type SendResult = { ok: boolean; error?: string; blocked?: boolean };
  * et journalise le resultat dans l'historique visible du tableau de bord.
  */
 export function sendWithGuards(phone: string, text: string, source: SendSource): Promise<SendResult> {
+  if (process.env.WHATSAPP_DISABLED === "true") {
+    const reason = "WhatsApp desactive (WHATSAPP_DISABLED=true) : envoi suspendu volontairement.";
+    addSendLogEntry({ phone, text, source, status: "blocked", error: reason });
+    return Promise.resolve({ ok: false, error: reason, blocked: true });
+  }
+
   const safety = checkCanSend(phone);
   if (!safety.allowed) {
     addSendLogEntry({ phone, text, source, status: "blocked", error: safety.reason });
