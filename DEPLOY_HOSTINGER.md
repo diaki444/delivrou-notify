@@ -1,5 +1,7 @@
 # Deploiement sur un VPS Hostinger
 
+> ⚠️ **Document partiellement obsolete** (ecrit pour l'ancienne connexion Baileys/QR code). Le service deploye actuellement tourne via EasyPanel/Docker et utilise l'API officielle WhatsApp Business (voir [`README.md`](./README.md), section "Configurer l'API WhatsApp Business") — plus de QR code a scanner. Les etapes systeme (Node, PM2, Nginx) restent valables pour un deploiement VPS classique hors EasyPanel, mais ignorez les passages qui parlent de scanner un QR ou de `auth_info` comme session WhatsApp.
+
 Guide complet pour faire tourner `delivrou-notify` en permanence sur un VPS Hostinger (Ubuntu/Debian), avec redemarrage automatique et HTTPS.
 
 ## 0. Prerequis
