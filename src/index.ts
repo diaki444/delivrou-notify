@@ -115,6 +115,9 @@ app.post("/webhook/whatsapp", (req, res) => {
   // Accuser reception immediatement : Meta reessaie/abandonne si la reponse tarde.
   res.sendStatus(200);
 
+  // eslint-disable-next-line no-console
+  console.log("[delivrou-notify] Webhook recu:", JSON.stringify(req.body));
+
   try {
     const payload = req.body as WhatsAppWebhookPayload;
     const value = payload.entry?.[0]?.changes?.[0]?.value;
