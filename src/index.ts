@@ -1,4 +1,6 @@
 import "dotenv/config";
+import fs from "node:fs";
+import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import QRCode from "qrcode";
 import { whatsapp } from "./whatsapp-client.js";
@@ -156,6 +158,24 @@ if (process.env.WHATSAPP_DISABLED === "true") {
       "Le tableau de bord reste accessible mais aucun message ne peut etre envoye ou recu.",
   );
 } else {
+  // Interrupteur ponctuel : WHATSAPP_WIPE_AUTH=true efface une session
+  // auth_info/ corrompue ou deconnectee (ex: code 401 au redemarrage) avant
+  // de relancer la connexion, pour forcer un nouveau scan de QR. A retirer
+  // de l'environnement une fois le nouveau QR scanne avec succes.
+  if (process.env.WHATSAPP_WIPE_AUTH === "true") {
+    const authDir = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
+    try {
+      fs.rmSync(authDir, { recursive: true, force: true });
+      // eslint-disable-next-line no-console
+      console.error(
+        `[delivrou-notify] WHATSAPP_WIPE_AUTH=true : session WhatsApp (${authDir}) effacee. ` +
+          "Retirez cette variable apres avoir rescanne le QR.",
+      );
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[delivrou-notify] Echec de l'effacement de auth_info:", err);
+    }
+  }
   void whatsapp.connect().catch((err) => {
     // eslint-disable-next-line no-console
     console.error("[delivrou-notify] Erreur de connexion WhatsApp:", err);
