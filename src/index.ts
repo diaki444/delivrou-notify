@@ -165,7 +165,13 @@ if (process.env.WHATSAPP_DISABLED === "true") {
   if (process.env.WHATSAPP_WIPE_AUTH === "true") {
     const authDir = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
     try {
-      fs.rmSync(authDir, { recursive: true, force: true });
+      // authDir est le point de montage du volume Docker : on ne peut pas
+      // supprimer le dossier lui-meme (EBUSY), seulement son contenu.
+      if (fs.existsSync(authDir)) {
+        for (const entry of fs.readdirSync(authDir)) {
+          fs.rmSync(path.join(authDir, entry), { recursive: true, force: true });
+        }
+      }
       // eslint-disable-next-line no-console
       console.error(
         `[delivrou-notify] WHATSAPP_WIPE_AUTH=true : session WhatsApp (${authDir}) effacee. ` +
