@@ -1,24 +1,28 @@
 # delivrou-notify
 
+> ℹ️ **Retour temporaire a Baileys (13 octobre 2026)** : la migration vers l'API officielle WhatsApp Business (Meta Cloud API) est en pause — le numero reste bloque au statut "En attente" cote Meta malgre plusieurs tentatives de verification (plus de 72h sans deblocage). En attendant la resolution par le support Meta, le service revient temporairement sur la connexion Baileys/QR code ci-dessous pour ne pas interrompre les notifications. La migration Meta reste a reprendre des que le numero sera debloque (code disponible dans l'historique git, commit `683c97d`).
+
 Service de notification WhatsApp pour **delivrou.com**, sans Twilio, NimbaSMS ni Wazzap AI.
 
-Il expose une API HTTP toute simple (`POST /send`) appelee par le backend de Delivrou a chaque evenement important (suivi de commande, etc.), et envoie le message via **l'API officielle WhatsApp Business Platform (Cloud API) de Meta** — pas de QR code, pas de session a maintenir, pas de risque de bannissement du numero.
+Il expose une API HTTP toute simple (`POST /send`) appelee par le backend de Delivrou a chaque evenement important (commande confirmee, livreur assigne, livraison terminee, nouvelle course pour un livreur...), et envoie le message via **votre propre numero WhatsApp**, connecte en local via [Baileys](https://github.com/WhiskeySockets/Baileys) (protocole WhatsApp Web multi-device, QR code).
 
-> Ce service utilisait auparavant [Baileys](https://github.com/WhiskeySockets/Baileys) (protocole WhatsApp Web non officiel, QR code). Il a ete migre vers l'API officielle de Meta le 9 octobre 2026, suite a un incident ou le mauvais numero avait ete connecte — l'API officielle elimine ce genre de risque (pas de session a scanner, pas de blocage possible du numero pour "automatisation non sanctionnee").
+Le code reutilise le meme principe que [`whatsapp-mcp`](../whatsapp-mcp) (le connecteur WhatsApp pour Claude Desktop), mais expose ici une API HTTP generique au lieu d'outils MCP, pour etre appele automatiquement par une application plutot que par Claude.
 
-## ⚠️ Important — la fenetre de 24 heures et les modeles de message
+## ⚠️ Important — ou heberger ce service
 
-L'API officielle impose une regle que Baileys n'avait pas : vous ne pouvez envoyer un **message texte libre** que dans les 24h suivant le dernier message **recu** de ce contact. Au-dela (ou pour le tout premier message a un nouveau client), il faut utiliser un **modele de message ("template") pre-approuve par Meta**.
+**Ce service ne peut pas tourner sur Cloudflare Workers** (la ou `jamm-express-deliveries` est deploye). Il a besoin :
 
-En pratique pour Delivrou :
-- Une **reponse manuelle** a un client qui vient d'ecrire : fonctionne toujours en texte libre (fenetre ouverte).
-- Le **suivi de commande automatique** : c'est souvent le tout premier message au client pour cette commande (fenetre fermee) → il faut un **modele de message approuve** pour que l'envoi reussisse de maniere fiable. Voir [developers.facebook.com](https://developers.facebook.com) > votre app > WhatsApp > Gestionnaire WhatsApp > Modeles de message, pour creer et soumettre un modele "Suivi de commande" a Meta (approbation generalement en quelques heures).
+1. d'une connexion WebSocket **persistante et longue duree** vers les serveurs WhatsApp (incompatible avec le modele "requete courte" des Workers/Functions serverless) ;
+2. d'un systeme de fichiers persistant pour `auth_info/` (les cles de session WhatsApp).
 
-Tant qu'aucun modele n'est approuve, les envois en dehors de la fenetre de 24h echoueront (visible dans `/dashboard/logs`) — **ce n'est pas un bug**, c'est la regle de l'API officielle.
+Il faut donc le deployer sur un **hote classique toujours allume** : un petit VPS (2 Go RAM suffisent largement), [Fly.io](https://fly.io), [Railway](https://railway.app), un Raspberry Pi, ou meme votre PC si vous le laissez allume (comme dans la video d'origine). Le backend Delivrou (Cloudflare Workers) lui fait simplement des appels HTTP sortants — ca, les Workers savent parfaitement le faire.
+
+**Guide pas-a-pas pour un VPS Hostinger (Node + PM2 + Nginx + HTTPS) : voir [`DEPLOY_HOSTINGER.md`](./DEPLOY_HOSTINGER.md).**
 
 ## ⚠️ Usage responsable
 
-- Utilisez ceci uniquement pour des **notifications transactionnelles** (le client a une relation active avec Delivrou : commande en cours). Ce n'est pas un outil de SMS marketing de masse — pour la prospection a froid, des regles encore plus strictes de Meta s'appliquent (categorie "marketing" des modeles).
+- Utilisez ceci uniquement pour des **notifications transactionnelles** (le client ou le livreur a une relation active avec Delivrou : commande en cours, course assignee). Ce n'est pas un outil de SMS marketing de masse.
+- Un volume d'envoi trop eleve ou des messages non sollicites peuvent faire bannir le numero WhatsApp connecte. Dediez un numero professionnel specifique a ce service (pas votre numero personnel).
 - Respectez le RGPD / les regles locales sur les communications electroniques : vos utilisateurs doivent savoir qu'ils recevront des notifications WhatsApp (mention dans vos CGU / parametres de notification).
 
 ## Installation
@@ -28,29 +32,28 @@ npm install
 npm run build
 ```
 
-## Configurer l'API WhatsApp Business (Meta Cloud API)
+## Premiere connexion (scan du QR code)
 
-1. Creez un compte [Meta Business Manager](https://business.facebook.com) et une app sur [developers.facebook.com](https://developers.facebook.com) (type "Entreprise", cas d'utilisation "WhatsApp").
-2. Reliez votre numero WhatsApp Business existant (ou enregistrez-en un nouveau) dans **Gestionnaire WhatsApp**.
-3. Recuperez le **Phone Number ID** (Gestionnaire WhatsApp > Numeros de telephone > cliquez sur votre numero).
-4. Generez un **token d'acces permanent** : Parametres de l'entreprise > Utilisateurs systeme > creez-en un, affectez-lui l'app et le compte WhatsApp (acces "Tout"/controle total sur les deux), puis "Generer un token" en cochant `whatsapp_business_management` et `whatsapp_business_messaging`.
-5. Configurez le **webhook** (pour recevoir les reponses des clients) : dans l'app > WhatsApp > Configuration > Webhooks, mettez l'URL `https://votre-domaine/webhook/whatsapp` et un token de verification de votre choix (meme valeur que `WHATSAPP_WEBHOOK_VERIFY_TOKEN` ci-dessous), puis abonnez-vous au champ `messages`.
+```bash
+npm start
+```
 
-Mettez ces valeurs dans `.env` (voir `.env.example`).
+Un QR code s'affiche dans le terminal :
+
+1. Ouvrez **WhatsApp** sur le telephone dedie au service.
+2. **Parametres > Appareils lies > Lier un appareil**.
+3. Scannez le QR.
+
+Une fois connecte, les cles de session sont sauvegardees dans `auth_info/` (ne pas committer, deja dans `.gitignore`). Laissez tourner.
 
 ## Variables d'environnement
 
 | Variable | Obligatoire | Description |
 |---|---|---|
 | `NOTIFY_SECRET` | Oui | Cle partagee a fournir dans l'en-tete `x-notify-key` pour authentifier les appels entrants. |
-| `WHATSAPP_PHONE_NUMBER_ID` | Oui | Identifiant du numero WhatsApp (Gestionnaire WhatsApp > Numeros de telephone). |
-| `WHATSAPP_ACCESS_TOKEN` | Oui | Token d'acces permanent (genere via un utilisateur systeme). |
-| `WHATSAPP_WEBHOOK_VERIFY_TOKEN` | Oui (pour recevoir les messages) | Doit correspondre exactement au token saisi cote Meta lors de la configuration du webhook. |
-| `WHATSAPP_BUSINESS_ACCOUNT_ID` | Non | ID du compte WhatsApp Business (WABA), utile pour la gestion des modeles de message. |
-| `WHATSAPP_API_VERSION` | Non (def. v21.0) | Version de l'API Graph utilisee. |
 | `PORT` | Non (def. 3300) | Port d'ecoute HTTP. |
-| `WHATSAPP_AUTH_DIR` | Non | Dossier de stockage de l'historique du tableau de bord (def. `./auth_info`). A monter sur un volume persistant en production — ne contient plus de cles de session WhatsApp (API officielle, sans session). |
-| `WHATSAPP_MIN_DELAY_MS` | Non (def. 1500) | Delai minimum entre deux envois, pour lisser les pics. |
+| `WHATSAPP_AUTH_DIR` | Non | Dossier de stockage des cles de session (def. `./auth_info`). A monter sur un volume persistant en production. |
+| `WHATSAPP_MIN_DELAY_MS` | Non (def. 1500) | Delai minimum entre deux envois, pour lisser les pics et reduire le risque de blocage. |
 | `WHATSAPP_SEND_TIMEOUT_MS` | Non (def. 20000) | Delai max d'attente pour un envoi avant de considerer l'appel en echec. |
 
 ## Tableau de bord web
@@ -103,7 +106,7 @@ En plus du delai minimum entre deux envois, le service applique automatiquement 
 
 Un appel a `POST /send` refuse par ces garde-fous renvoie `HTTP 429` avec un message explicatif dans `error`, et `retryAfterMs` quand c'est pertinent. Ajustez les valeurs dans `.env` selon votre volume reel (voir `.env.example`).
 
-Avec l'API officielle, ces garde-fous servent surtout a lisser le volume et a reagir vite en cas de probleme — le risque de bannissement du numero qui existait avec Baileys n'existe plus de la meme maniere (c'est Meta qui applique ses propres regles de qualite, visibles dans le Gestionnaire WhatsApp).
+Ces limites reduisent le risque mais ne l'eliminent pas : WhatsApp Web via Baileys reste un protocole non officiel. Pour un volume important sans risque, voir la section suivante.
 
 ## Prospection automatique (Google Places)
 
@@ -155,12 +158,26 @@ GEMINI_API_KEY=AIza...
 
 Laissez la variable vide pour desactiver completement l'IA : le reste du tableau de bord (envoi manuel, prospection avec modeles par defaut, journal) continue de fonctionner normalement.
 
-## Cout de l'API officielle
+## Migrer vers l'API officielle WhatsApp Business (Meta Cloud API)
 
-Gratuit jusqu'a un certain volume/mois selon les pays (les conversations repondant a un client dans les 24h sont desormais gratuites), puis paye au message au-dela pour les conversations initiees par l'entreprise (sans marge d'intermediaire type Twilio/NimbaSMS/Wazzap). Ajoutez un moyen de paiement dans le Gestionnaire WhatsApp pour passer en production.
+Le protocole utilise ici (WhatsApp Web via Baileys) n'est pas officiellement sanctionne par Meta pour de l'automatisation — a fort volume, le risque de blocage du numero augmente. L'alternative sans risque est l'**API officielle WhatsApp Business (Cloud API)**, hebergee directement par Meta (pas de QR code, pas de session a maintenir, pas de VPS necessaire pour la connexion elle-meme).
 
-### `POST /webhook/whatsapp` et `GET /webhook/whatsapp`
-Appelees uniquement par Meta (pas par `jamm-express-deliveries`) : handshake de verification puis reception des messages entrants des clients, pour alimenter les conversations visibles dans `/dashboard`.
+Migration prevue (quand vous etes pret) :
+1. Creer et verifier un **compte Meta Business**.
+2. Enregistrer un numero WhatsApp Business officiel.
+3. Faire approuver des **modeles de message** ("templates") pour les notifications proactives.
+4. Remplacer uniquement l'implementation interne de `src/whatsapp-client.ts` (appels HTTPS vers `graph.facebook.com` au lieu de Baileys) — **l'API `POST /send` exposee a `jamm-express-deliveries` reste identique**, aucun changement cote backend Delivrou.
+
+Cout : gratuit jusqu'a un certain volume/mois selon les pays, puis paye au message au-dela (sans marge d'intermediaire type Twilio/NimbaSMS/Wazzap).
+
+### `POST /check`
+Verifie si un numero a un compte WhatsApp actif (evite d'essayer d'envoyer a un numero qui n'en a pas).
+```json
+// Requete
+{ "phone": "224612345678" }
+// Reponse
+{ "ok": true, "phone": "224612345678", "exists": true }
+```
 
 ### `POST /send`
 ```json
@@ -182,14 +199,15 @@ docker run -d \
   --name delivrou-notify \
   -p 3300:3300 \
   -e NOTIFY_SECRET="une-longue-cle-secrete-aleatoire" \
-  -e WHATSAPP_PHONE_NUMBER_ID="..." \
-  -e WHATSAPP_ACCESS_TOKEN="..." \
-  -e WHATSAPP_WEBHOOK_VERIFY_TOKEN="..." \
   -v delivrou_notify_auth:/app/auth_info \
   delivrou-notify
 ```
 
-Aucun QR code a scanner : des que les variables sont definies, le service est pret.
+Puis regardez les logs une premiere fois pour scanner le QR :
+
+```bash
+docker logs -f delivrou-notify
+```
 
 ## Integration cote delivrou.com
 
@@ -205,5 +223,5 @@ Aucune autre modification n'est necessaire : le canal WhatsApp est deja limite a
 ## Limitations connues
 
 - Texte uniquement (pas de pieces jointes/images dans cette v1).
-- Un seul numero WhatsApp par instance du service. Pour plusieurs numeros (ex: un par ville), deployez plusieurs instances avec des identifiants Meta distincts.
-- Hors de la fenetre de 24h apres le dernier message d'un client, seul un **modele de message approuve** par Meta peut etre envoye (voir la section dediee plus haut) — un texte libre echouera.
+- Un seul numero WhatsApp par instance du service. Pour plusieurs numeros (ex: un par ville), deployez plusieurs instances avec des `WHATSAPP_AUTH_DIR` distincts.
+- Repose sur un protocole non officiel (Baileys) : pas de garantie contractuelle de WhatsApp/Meta, contrairement a l'API Business officielle (payante). Convient tres bien a un volume moyen de notifications transactionnelles ; au-dela de quelques milliers de messages/jour, envisagez l'API WhatsApp Business officielle.

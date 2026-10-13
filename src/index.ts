@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express, { type NextFunction, type Request, type Response } from "express";
+import QRCode from "qrcode";
 import { whatsapp } from "./whatsapp-client.js";
 import { getSafetyStatus } from "./safety.js";
 import { sendWithGuards, queueLength } from "./send-queue.js";
@@ -8,7 +9,6 @@ import { isDashboardConfigured } from "./auth.js";
 
 const PORT = Number(process.env.PORT || 3300);
 const NOTIFY_SECRET = process.env.NOTIFY_SECRET;
-const WEBHOOK_VERIFY_TOKEN = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
 
 if (!NOTIFY_SECRET) {
   // eslint-disable-next-line no-console
@@ -22,20 +22,6 @@ if (!isDashboardConfigured()) {
   // eslint-disable-next-line no-console
   console.error(
     "[delivrou-notify] Info : DASHBOARD_PASSWORD n'est pas defini, le tableau de bord web (/dashboard) est desactive.",
-  );
-}
-if (!whatsapp.isConfigured()) {
-  // eslint-disable-next-line no-console
-  console.error(
-    "[delivrou-notify] ATTENTION : WHATSAPP_PHONE_NUMBER_ID / WHATSAPP_ACCESS_TOKEN non definis. " +
-      "Aucun message ne pourra etre envoye tant que l'API WhatsApp Business (Meta Cloud API) n'est pas configuree.",
-  );
-}
-if (process.env.WHATSAPP_DISABLED === "true") {
-  // eslint-disable-next-line no-console
-  console.error(
-    "[delivrou-notify] WHATSAPP_DISABLED=true : envoi WhatsApp suspendu volontairement. " +
-      "Le tableau de bord reste accessible, mais aucun message ne peut etre envoye.",
   );
 }
 
@@ -76,73 +62,60 @@ app.get("/status", requireAuth, (_req, res) => {
   });
 });
 
-// --- Webhook WhatsApp (Meta Cloud API) ---
-// Meta appelle GET une seule fois pour verifier l'URL (handshake), puis
-// POST a chaque message recu ou mise a jour de statut. A configurer dans
-// developers.facebook.com > votre app > WhatsApp > Configuration >
-// Webhooks, avec l'URL https://votre-domaine/webhook/whatsapp et le meme
-// token que WHATSAPP_WEBHOOK_VERIFY_TOKEN.
-app.get("/webhook/whatsapp", (req, res) => {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
-
-  if (mode === "subscribe" && WEBHOOK_VERIFY_TOKEN && token === WEBHOOK_VERIFY_TOKEN) {
-    res.status(200).send(String(challenge ?? ""));
+// Page web pour scanner le QR code depuis un navigateur (plus fiable que les
+// logs en mode texte d'un panneau comme EasyPanel). Protegee par ?key=...
+// car un GET classique de navigateur ne permet pas d'envoyer un en-tete
+// personnalise facilement.
+app.get("/qr", async (req, res) => {
+  if (!NOTIFY_SECRET || req.query.key !== NOTIFY_SECRET) {
+    res.status(401).send("Unauthorized");
     return;
   }
-  res.sendStatus(403);
+
+  if (whatsapp.isConnected()) {
+    res.send(
+      "<!doctype html><meta charset='utf-8'><body style='font-family:sans-serif;text-align:center;padding:40px'>" +
+        "<h1>✅ WhatsApp deja connecte</h1><p>Rien a scanner, le service est pret.</p></body>",
+    );
+    return;
+  }
+
+  const qr = whatsapp.getLastQr();
+  if (!qr) {
+    res.send(
+      "<!doctype html><meta charset='utf-8'><meta http-equiv='refresh' content='3'>" +
+        "<body style='font-family:sans-serif;text-align:center;padding:40px'>" +
+        "<h1>⏳ En attente du QR code...</h1><p>Cette page se rafraichit automatiquement.</p></body>",
+    );
+    return;
+  }
+
+  const dataUrl = await QRCode.toDataURL(qr, { width: 320, margin: 2 });
+  res.send(
+    "<!doctype html><meta charset='utf-8'><meta http-equiv='refresh' content='20'>" +
+      "<body style='font-family:sans-serif;text-align:center;padding:40px'>" +
+      "<h1>Scannez ce QR code</h1>" +
+      "<p>WhatsApp &gt; Parametres &gt; Appareils lies &gt; Lier un appareil</p>" +
+      `<img src="${dataUrl}" alt="QR code WhatsApp" style="margin:20px auto" />` +
+      "<p style='color:#888'>Cette page se rafraichit automatiquement toutes les 20 secondes.</p></body>",
+  );
 });
 
-interface WhatsAppWebhookPayload {
-  entry?: Array<{
-    changes?: Array<{
-      value?: {
-        contacts?: Array<{ wa_id?: string; profile?: { name?: string } }>;
-        messages?: Array<{
-          from?: string;
-          id?: string;
-          timestamp?: string;
-          type?: string;
-          text?: { body?: string };
-        }>;
-      };
-    }>;
-  }>;
-}
-
-app.post("/webhook/whatsapp", (req, res) => {
-  // Accuser reception immediatement : Meta reessaie/abandonne si la reponse tarde.
-  res.sendStatus(200);
-
-  // eslint-disable-next-line no-console
-  console.log("[delivrou-notify] Webhook recu:", JSON.stringify(req.body));
-
+app.post("/check", requireAuth, async (req, res) => {
+  const phone = String(req.body?.phone || "").replace(/\D/g, "");
+  if (!phone) {
+    res.status(400).json({ ok: false, error: "phone manquant" });
+    return;
+  }
+  if (!whatsapp.isConnected()) {
+    res.status(503).json({ ok: false, error: "WhatsApp non connecte" });
+    return;
+  }
   try {
-    const payload = req.body as WhatsAppWebhookPayload;
-    const value = payload.entry?.[0]?.changes?.[0]?.value;
-    const messages = value?.messages ?? [];
-    if (messages.length === 0) return;
-
-    const nameByWaId = new Map<string, string | undefined>(
-      (value?.contacts ?? []).map((c) => [c.wa_id ?? "", c.profile?.name]),
-    );
-
-    for (const m of messages) {
-      if (!m.from || !m.id) continue;
-      const text = m.text?.body ?? (m.type ? `[message ${m.type}]` : "");
-      if (!text) continue;
-      whatsapp.handleIncomingMessage({
-        from: m.from,
-        id: m.id,
-        timestamp: (Number(m.timestamp) || 0) * 1000 || Date.now(),
-        text,
-        senderName: nameByWaId.get(m.from) || undefined,
-      });
-    }
+    const exists = await whatsapp.numberHasWhatsApp(phone);
+    res.json({ ok: true, phone, exists });
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error("[delivrou-notify] Erreur traitement webhook WhatsApp:", err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
   }
 });
 
@@ -155,7 +128,7 @@ app.post("/send", requireAuth, async (req, res) => {
     return;
   }
   if (!whatsapp.isConnected()) {
-    res.status(503).json({ ok: false, error: "API WhatsApp non configuree" });
+    res.status(503).json({ ok: false, error: "WhatsApp non connecte (QR pas encore scanne ou reconnexion en cours)" });
     return;
   }
 
@@ -175,6 +148,19 @@ app.listen(PORT, () => {
   // eslint-disable-next-line no-console
   console.log(`[delivrou-notify] API HTTP demarree sur le port ${PORT}`);
 });
+
+if (process.env.WHATSAPP_DISABLED === "true") {
+  // eslint-disable-next-line no-console
+  console.error(
+    "[delivrou-notify] WHATSAPP_DISABLED=true : connexion WhatsApp desactivee volontairement. " +
+      "Le tableau de bord reste accessible mais aucun message ne peut etre envoye ou recu.",
+  );
+} else {
+  void whatsapp.connect().catch((err) => {
+    // eslint-disable-next-line no-console
+    console.error("[delivrou-notify] Erreur de connexion WhatsApp:", err);
+  });
+}
 
 process.on("SIGTERM", () => process.exit(0));
 process.on("SIGINT", () => process.exit(0));
