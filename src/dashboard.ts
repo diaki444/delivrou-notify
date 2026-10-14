@@ -76,7 +76,6 @@ function shell(
   bodyHtml: string,
   active?: "chats" | "logs" | "prospects",
   activeJid?: string,
-  refreshSeconds?: number,
 ): string {
   const sidebarHtml = active ? desktopSidebar(active, activeJid) : "";
   return `<!doctype html>
@@ -85,7 +84,6 @@ function shell(
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="format-detection" content="telephone=no" />
-${refreshSeconds ? `<meta http-equiv="refresh" content="${refreshSeconds}" />` : ""}
 <title>${escapeHtml(title)} — delivrou-notify</title>
 <style>
   html, body { overflow-x: hidden; max-width: 100%; }
@@ -337,7 +335,7 @@ function desktopSidebar(active: "chats" | "logs" | "prospects", activeJid?: stri
       ${navItem("logs", "/dashboard/logs", ICONS.log, "Journal")}
     </nav>
     <div class="ds-section">Conversations</div>
-    <div class="ds-chats">${chatRows}</div>
+    <div class="ds-chats" id="ds-chats">${chatRows}</div>
   </aside>`;
 }
 
@@ -442,7 +440,7 @@ dashboardRouter.get("/", (req, res) => {
           </form>
         </div>
 
-        <div class="chip-row">
+        <div class="chip-row" id="status-chips">
           <div class="chip-card is-live"><div class="chip-icon">${connected ? "🟢" : "🔴"}</div><div class="label">WhatsApp</div><div class="value">${connected ? "Connecté" : "Déconnecté"}</div></div>
           <div class="chip-card"><div class="chip-icon">📨</div><div class="label">${safety.sentToday} / ${safety.maxPerDay}</div><div class="value">Envoyés aujourd'hui</div></div>
           <div class="chip-card"><div class="chip-icon">⏱️</div><div class="label">${safety.sentLastMinute} / ${safety.maxPerMinute}</div><div class="value">Cette minute</div></div>
@@ -450,17 +448,38 @@ dashboardRouter.get("/", (req, res) => {
           ${safety.circuitOpen ? `<div class="chip-card" style="border-color:var(--err)"><div class="chip-icon">⚠️</div><div class="label">Suspendu</div><div class="value">Protection active</div></div>` : ""}
         </div>
 
-        <div class="list">
+        <div class="list" id="chat-list">
           <div class="section-label">Conversations</div>
           ${chatRows}
         </div>
 
         <a class="fab" href="/dashboard/compose" aria-label="Nouveau message">${ICONS.plus}</a>
       </div>
-      ${tabbar("chats")}`,
+      ${tabbar("chats")}
+      <script>
+        // Met a jour la liste des conversations et le statut toutes les 10s,
+        // sans recharger toute la page (pour eviter le clignotement), et
+        // jamais si l'utilisateur est en train de taper une recherche.
+        function refreshList() {
+          var search = document.querySelector('.search-row input[name="q"]');
+          if (search && document.activeElement === search) return;
+          fetch(window.location.pathname + window.location.search)
+            .then(function (r) { return r.text(); })
+            .then(function (html) {
+              var doc = new DOMParser().parseFromString(html, "text/html");
+              ["chat-list", "status-chips", "ds-chats"].forEach(function (id) {
+                var fresh = doc.getElementById(id);
+                var current = document.getElementById(id);
+                if (fresh && current && fresh.innerHTML !== current.innerHTML) {
+                  current.innerHTML = fresh.innerHTML;
+                }
+              });
+            })
+            .catch(function () {});
+        }
+        setInterval(refreshList, 10000);
+      </script>`,
       "chats",
-      undefined,
-      20,
     ),
   );
 });
@@ -508,6 +527,14 @@ dashboardRouter.get("/chat/:jid", (req, res) => {
   const prospect = !chat?.name ? findProspectByPhone(jid.split("@")[0]) : undefined;
   const name = chat?.name || prospect?.name || formatJidLabel(jid);
   const suggestion = getSuggestedReply(jid);
+  // Conversation pas encore commencee avec un prospect connu : pre-remplit
+  // le champ avec le message de prospection de sa categorie (deja utilise
+  // pour les envois groupes), pour ne pas repartir d'une page blanche.
+  const prospectDraft =
+    !suggestion && msgs.length === 0 && prospect
+      ? personalizeMessage(DEFAULT_TEMPLATES[prospect.bucket], prospect.name)
+      : undefined;
+  const draftText = suggestion || prospectDraft;
 
   let lastDay = "";
   const bubbles = msgs
@@ -533,25 +560,29 @@ dashboardRouter.get("/chat/:jid", (req, res) => {
       <div class="messages" id="messages-pane">
         ${bubbles || `<div class="empty">Aucun message enregistre pour cette conversation.</div>`}
       </div>
-      ${
+      <div id="draft-box">${
         suggestion
           ? `<div class="ai-suggestion">
               <div class="ai-suggestion-label">💡 Brouillon suggéré par l'IA — à relire avant d'envoyer</div>
               ${escapeHtml(suggestion)}
             </div>`
-          : ""
-      }
+          : prospectDraft
+            ? `<div class="ai-suggestion">
+                <div class="ai-suggestion-label">✉️ Message de prospection pré-rempli (${escapeHtml(CATEGORY_LABELS[prospect!.bucket])}) — à adapter avant d'envoyer</div>
+                ${escapeHtml(prospectDraft)}
+              </div>`
+            : ""
+      }</div>
       <form class="composer" method="post" action="/dashboard/send">
         <input type="hidden" name="jid" value="${escapeHtml(jid)}" />
-        <input type="text" name="text" placeholder="Répondre..." value="${escapeHtml(suggestion || "")}" required />
+        <input type="text" name="text" placeholder="Répondre..." value="${escapeHtml(draftText || "")}" data-draft="${escapeHtml(draftText || "")}" required />
         <button class="send-btn" type="submit" aria-label="Envoyer">${ICONS.send}</button>
       </form>
       <script>
         // Descend automatiquement au dernier message a l'ouverture de la
-        // conversation (et apres chaque actualisation). On attend que la
-        // mise en page soit stabilisee (double requestAnimationFrame) avant
-        // de mesurer scrollHeight, sinon la valeur peut etre encore
-        // incorrecte juste apres le chargement de la page.
+        // conversation (et apres chaque mise a jour). On attend que la mise
+        // en page soit stabilisee (double requestAnimationFrame) avant de
+        // mesurer scrollHeight, sinon la valeur peut etre encore incorrecte.
         function scrollToLatest() {
           var pane = document.getElementById("messages-pane");
           if (!pane) return;
@@ -563,14 +594,45 @@ dashboardRouter.get("/chat/:jid", (req, res) => {
         }
         scrollToLatest();
         window.addEventListener("load", scrollToLatest);
-        // Actualise la conversation toutes les 4s pour voir les nouveaux
-        // messages (et le brouillon IA, qui met un instant a arriver) plus
-        // vite, mais seulement si rien n'est en train d'etre tape (pour ne
-        // jamais effacer une reponse en cours de redaction).
-        setInterval(function () {
+
+        // Verifie toutes les 4s s'il y a de nouveaux messages ou un
+        // brouillon IA, et met a jour seulement les parties concernees
+        // (sans recharger toute la page, pour eviter le "clignotement").
+        // Ne touche jamais au champ de reponse si l'utilisateur est en
+        // train d'y taper quelque chose.
+        function refreshChat() {
           var input = document.querySelector('.composer input[name="text"]');
-          if (!input || !input.value.trim()) window.location.reload();
-        }, 4000);
+          if (input && input.value.trim() && input.value !== input.getAttribute("data-draft")) return;
+          fetch(window.location.href)
+            .then(function (r) { return r.text(); })
+            .then(function (html) {
+              var doc = new DOMParser().parseFromString(html, "text/html");
+              var newPane = doc.getElementById("messages-pane");
+              var oldPane = document.getElementById("messages-pane");
+              var wasAtBottom = oldPane && oldPane.scrollTop + oldPane.clientHeight >= oldPane.scrollHeight - 40;
+              if (newPane && oldPane && newPane.innerHTML !== oldPane.innerHTML) {
+                oldPane.innerHTML = newPane.innerHTML;
+                if (wasAtBottom) scrollToLatest();
+              }
+              var newDraftBox = doc.getElementById("draft-box");
+              var oldDraftBox = document.getElementById("draft-box");
+              if (newDraftBox && oldDraftBox && newDraftBox.innerHTML !== oldDraftBox.innerHTML) {
+                oldDraftBox.innerHTML = newDraftBox.innerHTML;
+                var newInput = doc.querySelector('.composer input[name="text"]');
+                if (input && newInput && (!input.value || input.value === input.getAttribute("data-draft"))) {
+                  input.value = newInput.value;
+                  input.setAttribute("data-draft", newInput.value);
+                }
+              }
+              var newSidebar = doc.getElementById("ds-chats");
+              var oldSidebar = document.getElementById("ds-chats");
+              if (newSidebar && oldSidebar && newSidebar.innerHTML !== oldSidebar.innerHTML) {
+                oldSidebar.innerHTML = newSidebar.innerHTML;
+              }
+            })
+            .catch(function () {});
+        }
+        setInterval(refreshChat, 4000);
       </script>`,
       "chats",
       jid,
