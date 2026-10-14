@@ -115,7 +115,13 @@ function scheduleSave() {
         prospects,
         suggestedReplies: Object.fromEntries(suggestedReplies),
       };
-      fs.writeFileSync(DATA_FILE, JSON.stringify(shape), "utf8");
+      // Ecriture atomique (fichier temporaire puis renommage) : si le
+      // service est interrompu en pleine ecriture (redemarrage, crash),
+      // dashboard_data.json garde son contenu precedent intact au lieu de
+      // finir tronque/corrompu et illisible au prochain demarrage.
+      const tmpFile = `${DATA_FILE}.tmp`;
+      fs.writeFileSync(tmpFile, JSON.stringify(shape), "utf8");
+      fs.renameSync(tmpFile, DATA_FILE);
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("[delivrou-notify] Impossible de sauvegarder l'historique:", err);

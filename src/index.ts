@@ -166,9 +166,13 @@ if (process.env.WHATSAPP_DISABLED === "true") {
     const authDir = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
     try {
       // authDir est le point de montage du volume Docker : on ne peut pas
-      // supprimer le dossier lui-meme (EBUSY), seulement son contenu.
+      // supprimer le dossier lui-meme (EBUSY), seulement son contenu. On
+      // garde dashboard_data.json (conversations, prospects, journal),
+      // stocke dans le meme dossier que les cles de session WhatsApp : seule
+      // la session doit etre effacee, pas les donnees du tableau de bord.
       if (fs.existsSync(authDir)) {
         for (const entry of fs.readdirSync(authDir)) {
+          if (entry === "dashboard_data.json") continue;
           fs.rmSync(path.join(authDir, entry), { recursive: true, force: true });
         }
       }

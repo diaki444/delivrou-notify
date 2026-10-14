@@ -974,8 +974,8 @@ dashboardRouter.post("/prospection/send", async (req, res) => {
 
   let sent = 0;
   let failed = 0;
+  const prospects = listProspects(1000);
   for (const id of ids) {
-    const prospects = listProspects(1000);
     const p = prospects.find((x) => x.id === id);
     if (!p) continue;
     const personalized = personalizeMessage(text, p.name);
