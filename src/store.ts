@@ -166,6 +166,9 @@ export function isChatUnread(c: ChatMeta): boolean {
 
 export function recordMessage(msg: StoredMessage) {
   const list = messages.get(msg.chatJid) ?? [];
+  // Evite les doublons quand un message est deja enregistre de maniere
+  // optimiste a l'envoi, puis reconfirme par l'echo du serveur WhatsApp.
+  if (list.some((m) => m.id === msg.id)) return;
   list.push(msg);
   if (list.length > MAX_MESSAGES_PER_CHAT) list.shift();
   messages.set(msg.chatJid, list);

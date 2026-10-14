@@ -530,7 +530,7 @@ dashboardRouter.get("/chat/:jid", (req, res) => {
           <div class="chat-header-sub">${escapeHtml(jid.endsWith("@lid") ? "Numero masque par WhatsApp" : jid.split("@")[0])}</div>
         </div>
       </div>
-      <div class="messages">
+      <div class="messages" id="messages-pane">
         ${bubbles || `<div class="empty">Aucun message enregistre pour cette conversation.</div>`}
       </div>
       ${
@@ -547,6 +547,13 @@ dashboardRouter.get("/chat/:jid", (req, res) => {
         <button class="send-btn" type="submit" aria-label="Envoyer">${ICONS.send}</button>
       </form>
       <script>
+        // Descend automatiquement au dernier message a l'ouverture de la
+        // conversation (et apres chaque actualisation), pour ne pas avoir a
+        // faire defiler manuellement.
+        (function () {
+          var pane = document.getElementById("messages-pane");
+          if (pane) pane.scrollTop = pane.scrollHeight;
+        })();
         // Actualise la conversation toutes les 8s pour voir les nouveaux
         // messages, mais seulement si rien n'est en train d'etre tape (pour
         // ne jamais effacer une reponse en cours de redaction).

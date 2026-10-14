@@ -176,7 +176,16 @@ class WhatsAppClient {
     if (!this.sock) throw new Error("WhatsApp non connecte");
     if (!this.connected) throw new Error("WhatsApp pas encore pret (en attente de connexion)");
     const jid = target.includes("@") ? target : `${target}@s.whatsapp.net`;
-    await this.sock.sendMessage(jid, { text });
+    const sent = await this.sock.sendMessage(jid, { text });
+    // Enregistre le message tout de suite (plutot que d'attendre l'echo
+    // asynchrone de WhatsApp via messages.upsert) : sans ca, une page
+    // rechargee juste apres l'envoi ne montre pas encore le message qui
+    // vient de partir. recordMessage() ignore les doublons si l'echo
+    // arrive ensuite avec le meme id.
+    const id = sent?.key?.id;
+    if (id) {
+      recordMessage({ id, chatJid: jid, fromMe: true, text, timestamp: Date.now() });
+    }
   }
 }
 
