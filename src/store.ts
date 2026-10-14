@@ -123,11 +123,23 @@ function scheduleSave() {
 
 load();
 
+/**
+ * WhatsApp identifie certains contacts par un JID "@lid" (Linked ID,
+ * masque le numero reel, surtout pour les comptes Business) plutot que
+ * le classique "@s.whatsapp.net". Tant qu'on n'a pas de nom de contact,
+ * on affiche quelque chose de plus lisible que le JID brut complet.
+ */
+export function formatJidLabel(jid: string): string {
+  if (jid.endsWith("@g.us")) return `Groupe ${jid.split("@")[0]}`;
+  if (jid.endsWith("@lid")) return `Contact WhatsApp (ID ${jid.split("@")[0].slice(-6)})`;
+  return jid.split("@")[0];
+}
+
 export function upsertChat(jid: string, patch: Partial<ChatMeta>) {
   const existing = chats.get(jid);
   chats.set(jid, {
     jid,
-    name: patch.name ?? existing?.name ?? jid,
+    name: patch.name ?? existing?.name ?? formatJidLabel(jid),
     isGroup: jid.endsWith("@g.us"),
     lastText: patch.lastText ?? existing?.lastText,
     lastTimestamp: patch.lastTimestamp ?? existing?.lastTimestamp,

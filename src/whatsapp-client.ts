@@ -162,10 +162,20 @@ class WhatsAppClient {
     return Boolean(results?.[0]?.exists);
   }
 
-  async sendText(phoneDigits: string, text: string): Promise<void> {
+  /**
+   * `target` peut etre soit un numero en chiffres (ex: envoi automatique
+   * depuis le backend, qui ne connait que le numero), soit un JID complet
+   * deja connu (ex: reponse a une conversation existante). Certains
+   * contacts WhatsApp (notamment via le compte Business) sont identifies
+   * par un JID "@lid" (Linked ID, masque le numero reel) plutot que
+   * "@s.whatsapp.net" : reconstruire `${phoneDigits}@s.whatsapp.net` dans
+   * ce cas enverrait vers une adresse inexistante et echouerait en
+   * silence. On garde donc le JID original tel quel quand on l'a.
+   */
+  async sendText(target: string, text: string): Promise<void> {
     if (!this.sock) throw new Error("WhatsApp non connecte");
     if (!this.connected) throw new Error("WhatsApp pas encore pret (en attente de connexion)");
-    const jid = `${phoneDigits}@s.whatsapp.net`;
+    const jid = target.includes("@") ? target : `${target}@s.whatsapp.net`;
     await this.sock.sendMessage(jid, { text });
   }
 }

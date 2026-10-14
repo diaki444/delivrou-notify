@@ -17,6 +17,7 @@ import {
   getSuggestedReply,
   clearSuggestedReply,
   findProspectByPhone,
+  formatJidLabel,
 } from "./store.js";
 import { sendWithGuards, queueLength } from "./send-queue.js";
 import { searchPlaces, phoneToDigits, isPlacesConfigured } from "./places.js";
@@ -495,7 +496,7 @@ dashboardRouter.get("/chat/:jid", (req, res) => {
   const chat = getChat(jid);
   const msgs = getMessages(jid, 150);
   const prospect = !chat?.name ? findProspectByPhone(jid.split("@")[0]) : undefined;
-  const name = chat?.name || prospect?.name || jid;
+  const name = chat?.name || prospect?.name || formatJidLabel(jid);
   const suggestion = getSuggestedReply(jid);
 
   let lastDay = "";
@@ -516,7 +517,7 @@ dashboardRouter.get("/chat/:jid", (req, res) => {
         <div class="avatar ${chat?.isGroup ? "group" : ""}">${escapeHtml(initials(name))}</div>
         <div class="chat-header-id">
           <div class="chat-header-name">${escapeHtml(name)}</div>
-          <div class="chat-header-sub">${escapeHtml(jid.split("@")[0])}</div>
+          <div class="chat-header-sub">${escapeHtml(jid.endsWith("@lid") ? "Numero masque par WhatsApp" : jid.split("@")[0])}</div>
         </div>
       </div>
       <div class="messages">
@@ -543,17 +544,21 @@ dashboardRouter.get("/chat/:jid", (req, res) => {
 
 dashboardRouter.post("/send", async (req, res) => {
   const text = String(req.body?.text || "").trim();
-  let phone = String(req.body?.phone || "").replace(/\D/g, "");
+  const phoneDigits = String(req.body?.phone || "").replace(/\D/g, "");
   const jid = String(req.body?.jid || "");
 
-  if (!phone && jid) phone = jid.split("@")[0];
+  // Reponse a une conversation existante : on envoie au JID complet tel
+  // quel (certains contacts utilisent un JID "@lid" qui masque le numero
+  // reel ; reconstruire depuis les chiffres seuls enverrait au mauvais
+  // endroit). Sinon (nouveau numero saisi a la main), on envoie au numero.
+  const target = jid || phoneDigits;
 
-  if (!phone || !text) {
+  if (!target || !text) {
     res.redirect(jid ? `/dashboard/chat/${encodeURIComponent(jid)}` : "/dashboard");
     return;
   }
 
-  await sendWithGuards(phone, text, "manual");
+  await sendWithGuards(target, text, "manual");
   if (jid) clearSuggestedReply(jid);
   res.redirect(jid ? `/dashboard/chat/${encodeURIComponent(jid)}` : "/dashboard");
 });
