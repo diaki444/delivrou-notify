@@ -545,7 +545,16 @@ dashboardRouter.get("/chat/:jid", (req, res) => {
         <input type="hidden" name="jid" value="${escapeHtml(jid)}" />
         <input type="text" name="text" placeholder="Répondre..." value="${escapeHtml(suggestion || "")}" required />
         <button class="send-btn" type="submit" aria-label="Envoyer">${ICONS.send}</button>
-      </form>`,
+      </form>
+      <script>
+        // Actualise la conversation toutes les 8s pour voir les nouveaux
+        // messages, mais seulement si rien n'est en train d'etre tape (pour
+        // ne jamais effacer une reponse en cours de redaction).
+        setInterval(function () {
+          var input = document.querySelector('.composer input[name="text"]');
+          if (!input || !input.value.trim()) window.location.reload();
+        }, 8000);
+      </script>`,
       "chats",
       jid,
     ),
