@@ -14,6 +14,18 @@ export function isGeminiConfigured(): boolean {
   return Boolean(GEMINI_API_KEY);
 }
 
+// Coupe-circuit : des lors qu'on recoit un 429 "quota depasse" (offre
+// gratuite Gemini), on arrete d'appeler l'API pendant un moment plutot que
+// de marteler les requetes (ce qui ne fait qu'allonger le blocage de quota
+// et remplir les logs d'erreurs identiques). Partage par toutes les
+// fonctions de ce fichier, puisque le quota est le meme pour toutes.
+const QUOTA_COOLDOWN_MS = 2 * 60_000;
+let quotaCooldownUntil = 0;
+
+function isOnQuotaCooldown(): boolean {
+  return Date.now() < quotaCooldownUntil;
+}
+
 /**
  * Contexte entreprise injecte dans chaque prompt, pour que l'IA reponde en
  * connaissance de cause plutot que de maniere generique. Sourcee depuis le
@@ -93,6 +105,9 @@ async function callGemini(prompt: string): Promise<{ ok: boolean; text?: string;
   if (!GEMINI_API_KEY) {
     return { ok: false, error: "GEMINI_API_KEY non configurée sur le serveur." };
   }
+  if (isOnQuotaCooldown()) {
+    return { ok: false, error: "Quota IA depasse, en pause temporaire." };
+  }
   // Les modeles "flash" recents (dont gemini-3.8-flash) reflechissent en
   // interne avant de repondre, et ce raisonnement peut consommer le budget
   // de tokens de sortie avant meme d'ecrire le message final (cause des
@@ -121,6 +136,14 @@ async function callGemini(prompt: string): Promise<{ ok: boolean; text?: string;
         lastError = `Gemini ${res.status}: ${body.slice(0, 300)}`;
         // eslint-disable-next-line no-console
         console.error(`[delivrou-notify] Appel Gemini echoue (config ${JSON.stringify(extraConfig)}):`, lastError);
+        if (res.status === 429) {
+          // Quota de l'offre gratuite depasse : inutile de reessayer tout de
+          // suite (ni avec l'autre config), ca ne ferait qu'ajouter des
+          // appels a un quota deja epuise. On coupe les appels IA pour un
+          // moment, le temps que le quota se regenere.
+          quotaCooldownUntil = Date.now() + QUOTA_COOLDOWN_MS;
+          return { ok: false, error: lastError };
+        }
         continue; // essaie la config suivante (ex: sans thinkingConfig)
       }
       const data = (await res.json()) as {
