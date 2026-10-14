@@ -96,7 +96,19 @@ async function callGemini(prompt: string): Promise<{ ok: boolean; text?: string;
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.6, maxOutputTokens: 500 },
+          generationConfig: {
+            temperature: 0.6,
+            // Les modeles "flash" recents (dont gemini-3.8-flash) reflechissent
+            // en interne avant de repondre, et ce raisonnement consomme le
+            // budget de tokens de sortie avant meme d'ecrire le message final
+            // (cause des brouillons coupes/casses observes). Sur cette
+            // famille de modeles, la reflexion ne peut pas etre totalement
+            // desactivee (thinkingBudget n'est pas supporte) : on la met au
+            // niveau le plus bas possible, et on laisse une marge large de
+            // tokens pour que le raisonnement n'empiete plus sur la reponse.
+            thinkingConfig: { thinkingLevel: "low" },
+            maxOutputTokens: 2048,
+          },
         }),
       },
     );
