@@ -56,7 +56,12 @@ const FORMAT_RULES =
   `Regles de format strictes : reponds UNIQUEMENT avec le message final a envoyer sur WhatsApp, rien d'autre. ` +
   `Jamais de titre, de prefixe du type "Ton:", "Tone:", "Objectif:", "Note:", jamais de markdown (pas de **, pas de ` +
   `tirets de liste, pas de guillemets autour du message), jamais un mot d'anglais, jamais d'explication de ta ` +
-  `demarche. Si tu ne peux pas produire un brouillon pertinent, reponds avec une chaine vide.`;
+  `demarche. Si tu ne peux pas produire un brouillon pertinent, reponds avec une chaine vide.\n\n` +
+  `Style : ecris comme un vrai commercial Delivrou qui repond depuis son telephone, pas comme un robot ni une ` +
+  `brochure. Par defaut, reste TRES court : une phrase, parfois deux, l'essentiel seulement — comme repondrait ` +
+  `une personne occupee mais attentive. N'allonge le message que si la question posee l'exige vraiment ` +
+  `(plusieurs infos precises demandees d'un coup, ou explication qui ne peut pas etre coupee) ; dans ce cas, ` +
+  `reste quand meme direct, sans remplissage ni phrases de politesse inutiles.`;
 
 /** Rejette les reponses IA mal formees (restes de meta-commentaire, markdown, anglais) avant de les proposer. */
 function sanitizeAiText(raw: string): string | null {
@@ -156,7 +161,7 @@ export async function generateProspectMessage(
     `${COMPANY_CONTEXT}\n\n` +
     `Tu rediges un message WhatsApp de prospection pour approcher un nouveau commerce partenaire. ` +
     `Cible : des commerces de type "${categoryLabel}". ` +
-    `Contraintes : maximum 3 phrases courtes, utilise exactement le texte "{nom}" (avec les accolades) ` +
+    `Contraintes : 1 a 2 phrases courtes maximum, utilise exactement le texte "{nom}" (avec les accolades) ` +
     `a la place du nom du commerce, propose le service de livraison et termine par une question simple ` +
     `pour engager la conversation.\n\n${FORMAT_RULES}`;
   return callGemini(prompt);
@@ -191,6 +196,6 @@ export async function suggestReply(
     `Tu es l'assistant du service clientele de Delivrou. ${goal}\n\n` +
     `Voici les derniers messages de la conversation WhatsApp :\n${transcript}\n\n` +
     `Propose un brouillon de reponse au dernier message, a envoyer par un humain qui relira et validera avant envoi. ` +
-    `Maximum 2-3 phrases courtes.\n\n${FORMAT_RULES}`;
+    `1 phrase par defaut, 2 maximum sauf si la question l'exige vraiment.\n\n${FORMAT_RULES}`;
   return callGemini(prompt);
 }
