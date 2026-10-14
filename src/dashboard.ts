@@ -548,19 +548,29 @@ dashboardRouter.get("/chat/:jid", (req, res) => {
       </form>
       <script>
         // Descend automatiquement au dernier message a l'ouverture de la
-        // conversation (et apres chaque actualisation), pour ne pas avoir a
-        // faire defiler manuellement.
-        (function () {
+        // conversation (et apres chaque actualisation). On attend que la
+        // mise en page soit stabilisee (double requestAnimationFrame) avant
+        // de mesurer scrollHeight, sinon la valeur peut etre encore
+        // incorrecte juste apres le chargement de la page.
+        function scrollToLatest() {
           var pane = document.getElementById("messages-pane");
-          if (pane) pane.scrollTop = pane.scrollHeight;
-        })();
-        // Actualise la conversation toutes les 8s pour voir les nouveaux
-        // messages, mais seulement si rien n'est en train d'etre tape (pour
-        // ne jamais effacer une reponse en cours de redaction).
+          if (!pane) return;
+          requestAnimationFrame(function () {
+            requestAnimationFrame(function () {
+              pane.scrollTop = pane.scrollHeight;
+            });
+          });
+        }
+        scrollToLatest();
+        window.addEventListener("load", scrollToLatest);
+        // Actualise la conversation toutes les 4s pour voir les nouveaux
+        // messages (et le brouillon IA, qui met un instant a arriver) plus
+        // vite, mais seulement si rien n'est en train d'etre tape (pour ne
+        // jamais effacer une reponse en cours de redaction).
         setInterval(function () {
           var input = document.querySelector('.composer input[name="text"]');
           if (!input || !input.value.trim()) window.location.reload();
-        }, 8000);
+        }, 4000);
       </script>`,
       "chats",
       jid,
