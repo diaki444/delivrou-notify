@@ -18,6 +18,8 @@ import {
   clearSuggestedReply,
   findProspectByPhone,
   formatJidLabel,
+  markChatViewed,
+  isChatUnread,
 } from "./store.js";
 import { sendWithGuards, queueLength } from "./send-queue.js";
 import { searchPlaces, phoneToDigits, isPlacesConfigured } from "./places.js";
@@ -74,6 +76,7 @@ function shell(
   bodyHtml: string,
   active?: "chats" | "logs" | "prospects",
   activeJid?: string,
+  refreshSeconds?: number,
 ): string {
   const sidebarHtml = active ? desktopSidebar(active, activeJid) : "";
   return `<!doctype html>
@@ -82,6 +85,7 @@ function shell(
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="format-detection" content="telephone=no" />
+${refreshSeconds ? `<meta http-equiv="refresh" content="${refreshSeconds}" />` : ""}
 <title>${escapeHtml(title)} — delivrou-notify</title>
 <style>
   html, body { overflow-x: hidden; max-width: 100%; }
@@ -150,6 +154,7 @@ function shell(
   .ds-chat.is-active { background: var(--surface); color: var(--fg); font-weight: 700; }
   .ds-chat .avatar { width: 24px; height: 24px; font-size: 10px; flex: none; }
   .ds-chat span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ds-chat .unread-dot { margin-left: auto; }
   .ds-empty { padding: 10px 16px; font-size: 12.5px; color: var(--fg-faint); }
 
   .topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: linear-gradient(165deg, var(--header-2), var(--header)); padding: 10px 14px 16px; }
@@ -183,7 +188,8 @@ function shell(
   .avatar.group { background: var(--fg-muted); color: var(--bg); }
   .chat-main { flex: 1; min-width: 0; }
   .chat-top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
-  .chat-name { font-weight: 700; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chat-name { font-weight: 700; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-flex; align-items: center; gap: 6px; }
+  .unread-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex: none; display: inline-block; }
   .chat-time { font-size: 11px; color: var(--fg-faint); flex: none; font-variant-numeric: tabular-nums; }
   .chat-preview { font-size: 13px; color: var(--fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
   .chat-preview b { color: var(--fg); font-weight: 600; }
@@ -313,6 +319,7 @@ function desktopSidebar(active: "chats" | "logs" | "prospects", activeJid?: stri
           (c) => `<a class="ds-chat ${activeJid === c.jid ? "is-active" : ""}" href="/dashboard/chat/${encodeURIComponent(c.jid)}">
         <div class="avatar ${c.isGroup ? "group" : ""}">${escapeHtml(initials(c.name))}</div>
         <span>${escapeHtml(c.name)}</span>
+        ${isChatUnread(c) ? `<div class="unread-dot" title="Nouveau message"></div>` : ""}
       </a>`,
         )
         .join("")
@@ -406,7 +413,7 @@ dashboardRouter.get("/", (req, res) => {
         <div class="avatar ${c.isGroup ? "group" : ""}">${escapeHtml(initials(c.name))}</div>
         <div class="chat-main">
           <div class="chat-top">
-            <span class="chat-name">${escapeHtml(c.name)}</span>
+            <span class="chat-name">${escapeHtml(c.name)}${isChatUnread(c) ? `<span class="unread-dot" title="Nouveau message"></span>` : ""}</span>
             <span class="chat-time">${c.lastTimestamp ? timeShort(c.lastTimestamp) : ""}</span>
           </div>
           <div class="chat-preview">${escapeHtml((c.lastText || "").slice(0, 90))}</div>
@@ -452,6 +459,8 @@ dashboardRouter.get("/", (req, res) => {
       </div>
       ${tabbar("chats")}`,
       "chats",
+      undefined,
+      20,
     ),
   );
 });
@@ -493,6 +502,7 @@ dashboardRouter.get("/compose", (_req, res) => {
 
 dashboardRouter.get("/chat/:jid", (req, res) => {
   const jid = req.params.jid;
+  markChatViewed(jid);
   const chat = getChat(jid);
   const msgs = getMessages(jid, 150);
   const prospect = !chat?.name ? findProspectByPhone(jid.split("@")[0]) : undefined;

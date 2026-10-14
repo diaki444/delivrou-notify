@@ -24,6 +24,8 @@ export interface ChatMeta {
   isGroup: boolean;
   lastText?: string;
   lastTimestamp?: number;
+  lastFromMe?: boolean;
+  lastViewedAt?: number;
 }
 
 export interface SendLogEntry {
@@ -143,8 +145,23 @@ export function upsertChat(jid: string, patch: Partial<ChatMeta>) {
     isGroup: jid.endsWith("@g.us"),
     lastText: patch.lastText ?? existing?.lastText,
     lastTimestamp: patch.lastTimestamp ?? existing?.lastTimestamp,
+    lastFromMe: patch.lastFromMe ?? existing?.lastFromMe,
+    lastViewedAt: patch.lastViewedAt ?? existing?.lastViewedAt,
   });
   scheduleSave();
+}
+
+/** A appeler quand l'utilisateur ouvre une conversation, pour effacer son badge "non lu". */
+export function markChatViewed(jid: string) {
+  const existing = chats.get(jid);
+  if (!existing) return;
+  chats.set(jid, { ...existing, lastViewedAt: Date.now() });
+  scheduleSave();
+}
+
+/** Vrai si le dernier message de la conversation est entrant et n'a pas encore ete vu dans le dashboard. */
+export function isChatUnread(c: ChatMeta): boolean {
+  return c.lastFromMe === false && (c.lastTimestamp ?? 0) > (c.lastViewedAt ?? 0);
 }
 
 export function recordMessage(msg: StoredMessage) {
@@ -153,7 +170,7 @@ export function recordMessage(msg: StoredMessage) {
   if (list.length > MAX_MESSAGES_PER_CHAT) list.shift();
   messages.set(msg.chatJid, list);
 
-  upsertChat(msg.chatJid, { lastText: msg.text, lastTimestamp: msg.timestamp });
+  upsertChat(msg.chatJid, { lastText: msg.text, lastTimestamp: msg.timestamp, lastFromMe: msg.fromMe });
 }
 
 export function listChats(limit = 100): ChatMeta[] {
