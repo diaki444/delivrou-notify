@@ -16,18 +16,41 @@ export function isGeminiConfigured(): boolean {
 
 /**
  * Contexte entreprise injecte dans chaque prompt, pour que l'IA reponde en
- * connaissance de cause plutot que de maniere generique. A completer/ajuster
- * au besoin (zones couvertes, tarifs, delais reels...).
+ * connaissance de cause plutot que de maniere generique. Sourcee depuis le
+ * site et l'application Delivrou (page d'accueil, page "A propos", FAQ
+ * support) : a tenir a jour si l'offre evolue (zones, tarifs, horaires...).
  */
 const COMPANY_CONTEXT =
-  `Delivrou est un service de livraison a la demande a Conakry, Guinee. ` +
-  `Deux activites : (1) livraison pour des commerces partenaires (pharmacies, epiceries, restaurants, boutiques) ` +
-  `qui confient leurs livraisons a des livreurs Delivrou plutot que de geren leur propre logistique ; ` +
-  `(2) suivi de commande pour les clients finaux qui ont deja commande (colis ou repas), avec un livreur assigne ` +
-  `et un statut de livraison en temps reel. Delivrou met en avant : rapidite, fiabilite, livreurs serieux, ` +
-  `pas de mauvaises surprises sur le tarif. Pas de SMS/WhatsApp marketing en masse : on contacte seulement les ` +
-  `prospects interesses et les clients ayant une commande active. Ton de marque : chaleureux, direct, respectueux, ` +
-  `"a la guineenne" (naturel, pas de jargon corporate, pas de ton robotique).`;
+  `Delivrou est une plateforme guineenne de livraison nee a Conakry, qui relie clients, commerces partenaires ` +
+  `(restaurants, pharmacies, epiceries) et livreurs independants. Slogan : "Delivrou, vite fait." ` +
+  `Siege a Sonfonia Gare, Conakry. Zones couvertes : Conakry et sa peripherie (13 communes), principalement ` +
+  `Kaloum, Dixinn, Ratoma, Matam et Matoto. Ouvert 7j/7 de 7h a 23h.\n\n` +
+  `Quatre services : Delivrou Repas (commande chez des restaurants partenaires et suivi jusqu'a la porte), ` +
+  `Delivrou Colis (document, cadeau ou marchandise, un ou plusieurs arrets, ou un livreur fait les achats ` +
+  `pour le client), Delivrou Pharmacie (produits de pharmacie livres) et Delivrou Epicerie (courses du ` +
+  `quotidien).\n\n` +
+  `Deux publics : (1) les commerces partenaires (restaurants, pharmacies, epiceries) qui confient leurs ` +
+  `livraisons a des livreurs Delivrou plutot que de gerer leur propre logistique ; (2) les clients finaux qui ` +
+  `commandent et suivent leur livraison en temps reel, avec un code a 4 chiffres pour confirmer la remise en ` +
+  `main propre.\n\n` +
+  `Paiement : Orange Money, MTN Mobile Money, ou especes. Pour un repas, le client paie directement le ` +
+  `restaurant via son code marchand OM/MoMo affiche dans l'appli. Pour un colis, paiement OM a la commande ou ` +
+  `especes a la livraison. Le prix total (frais de livraison inclus) est toujours affiche avant de valider la ` +
+  `commande, sans surprise.\n\n` +
+  `Delai de livraison typique : entre 30 min et 1h30 selon la distance et l'heure. Annulation gratuite dans les ` +
+  `10 minutes suivant la commande ; au-dela, si le livreur est deja en route, des frais de 5 000 GNF sont dus ` +
+  `(retenus automatiquement si paiement Orange Money, sinon une dette est creee sur le compte client a regler ` +
+  `avant la prochaine commande). En cas de 2 dettes impayees ou plus, le compte est bloque jusqu'au reglement ` +
+  `(reglable en un clic via Orange Money ou MoMo, deblocage immediat).\n\n` +
+  `Livreurs : independants, identifies, notes par la communaute, choisissent leurs horaires et voient le trajet ` +
+  `avant d'accepter une course.\n\n` +
+  `Valeurs mises en avant : simplicite (commande en quelques taps), confiance (livreurs identifies, code de ` +
+  `confirmation, support disponible 7j/7), impact local (revenus pour les livreurs, visibilite pour les ` +
+  `restaurateurs). Positionnement : "pense pour Conakry, pas copie d'ailleurs" — rapide, fiable, abordable, ` +
+  `tarif clair avant de confirmer.\n\n` +
+  `Delivrou n'envoie pas de SMS/WhatsApp marketing en masse : on contacte seulement les prospects interesses ` +
+  `et les clients ayant une commande active. Ton de marque : chaleureux, direct, respectueux, "a la guineenne" ` +
+  `(naturel, pas de jargon corporate, pas de ton robotique).`;
 
 const FORMAT_RULES =
   `Regles de format strictes : reponds UNIQUEMENT avec le message final a envoyer sur WhatsApp, rien d'autre. ` +
