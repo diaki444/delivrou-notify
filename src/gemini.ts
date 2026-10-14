@@ -88,51 +88,64 @@ async function callGemini(prompt: string): Promise<{ ok: boolean; text?: string;
   if (!GEMINI_API_KEY) {
     return { ok: false, error: "GEMINI_API_KEY non configurée sur le serveur." };
   }
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.6,
-            // Les modeles "flash" recents (dont gemini-3.8-flash) reflechissent
-            // en interne avant de repondre, et ce raisonnement consomme le
-            // budget de tokens de sortie avant meme d'ecrire le message final
-            // (cause des brouillons coupes/casses observes). Sur cette
-            // famille de modeles, la reflexion ne peut pas etre totalement
-            // desactivee (thinkingBudget n'est pas supporte) : on la met au
-            // niveau le plus bas possible, et on laisse une marge large de
-            // tokens pour que le raisonnement n'empiete plus sur la reponse.
-            thinkingConfig: { thinkingLevel: "low" },
-            maxOutputTokens: 2048,
-          },
-        }),
-      },
-    );
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      return { ok: false, error: `Gemini ${res.status}: ${body.slice(0, 300)}` };
+  // Les modeles "flash" recents (dont gemini-3.8-flash) reflechissent en
+  // interne avant de repondre, et ce raisonnement peut consommer le budget
+  // de tokens de sortie avant meme d'ecrire le message final (cause des
+  // brouillons coupes/casses observes). On essaie d'abord de reduire ce
+  // raisonnement au minimum ; si l'API rejette ce parametre (non supporte
+  // selon la version du modele/endpoint), on reessaie sans, pour ne jamais
+  // perdre la suggestion a cause d'un reglage non reconnu.
+  const attempts = [{ thinkingConfig: { thinkingLevel: "low" } }, {}];
+
+  let lastError = "Reponse IA indisponible.";
+  for (const extraConfig of attempts) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.6, maxOutputTokens: 2048, ...extraConfig },
+          }),
+        },
+      );
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        lastError = `Gemini ${res.status}: ${body.slice(0, 300)}`;
+        // eslint-disable-next-line no-console
+        console.error(`[delivrou-notify] Appel Gemini echoue (config ${JSON.stringify(extraConfig)}):`, lastError);
+        continue; // essaie la config suivante (ex: sans thinkingConfig)
+      }
+      const data = (await res.json()) as {
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }>;
+      };
+      const candidate = data.candidates?.[0];
+      const raw = candidate?.content?.parts?.map((p) => p.text || "").join("").trim();
+      if (!raw) {
+        lastError = "Réponse IA vide.";
+        continue;
+      }
+      // MAX_TOKENS veut dire que Gemini a ete coupe en pleine phrase : mieux
+      // vaut ne rien proposer qu'un brouillon tronque envoye par erreur.
+      if (candidate?.finishReason === "MAX_TOKENS") {
+        lastError = "Réponse IA tronquée (limite de longueur atteinte), ignorée par sécurité.";
+        continue;
+      }
+      const text = sanitizeAiText(raw);
+      if (!text) {
+        lastError = "Réponse IA mal formée, ignorée par sécurité.";
+        continue;
+      }
+      return { ok: true, text };
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      // eslint-disable-next-line no-console
+      console.error("[delivrou-notify] Erreur appel Gemini:", lastError);
     }
-    const data = (await res.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }>;
-    };
-    const candidate = data.candidates?.[0];
-    const raw = candidate?.content?.parts?.map((p) => p.text || "").join("").trim();
-    if (!raw) return { ok: false, error: "Réponse IA vide." };
-    // MAX_TOKENS veut dire que Gemini a ete coupe en pleine phrase : mieux
-    // vaut ne rien proposer qu'un brouillon tronque envoye par erreur.
-    if (candidate?.finishReason === "MAX_TOKENS") {
-      return { ok: false, error: "Réponse IA tronquée (limite de longueur atteinte), ignorée par sécurité." };
-    }
-    const text = sanitizeAiText(raw);
-    if (!text) return { ok: false, error: "Réponse IA mal formée, ignorée par sécurité." };
-    return { ok: true, text };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
+  return { ok: false, error: lastError };
 }
 
 /** Propose un message de prospection pour une famille d'etablissements donnee. */
