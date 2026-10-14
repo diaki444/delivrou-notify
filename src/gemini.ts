@@ -75,6 +75,12 @@ function sanitizeAiText(raw: string): string | null {
   ];
   if (suspiciousPatterns.some((re) => re.test(text))) return null;
 
+  // Garde-fou supplementaire si l'API ne signale pas la troncature : un
+  // brouillon qui ne se termine pas sur une ponctuation/emoji normale est
+  // probablement coupe en pleine phrase.
+  const endsCleanly = /[.!?…"»’)\u{1F300}-\u{1FAFF}☀-➿]\s*$/u.test(text);
+  if (!endsCleanly) return null;
+
   return text;
 }
 
@@ -90,7 +96,7 @@ async function callGemini(prompt: string): Promise<{ ok: boolean; text?: string;
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.6, maxOutputTokens: 300 },
+          generationConfig: { temperature: 0.6, maxOutputTokens: 500 },
         }),
       },
     );
@@ -99,10 +105,16 @@ async function callGemini(prompt: string): Promise<{ ok: boolean; text?: string;
       return { ok: false, error: `Gemini ${res.status}: ${body.slice(0, 300)}` };
     }
     const data = (await res.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }>;
     };
-    const raw = data.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("").trim();
+    const candidate = data.candidates?.[0];
+    const raw = candidate?.content?.parts?.map((p) => p.text || "").join("").trim();
     if (!raw) return { ok: false, error: "Réponse IA vide." };
+    // MAX_TOKENS veut dire que Gemini a ete coupe en pleine phrase : mieux
+    // vaut ne rien proposer qu'un brouillon tronque envoye par erreur.
+    if (candidate?.finishReason === "MAX_TOKENS") {
+      return { ok: false, error: "Réponse IA tronquée (limite de longueur atteinte), ignorée par sécurité." };
+    }
     const text = sanitizeAiText(raw);
     if (!text) return { ok: false, error: "Réponse IA mal formée, ignorée par sécurité." };
     return { ok: true, text };
