@@ -8,7 +8,10 @@
  */
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+// "flash-lite" est le modele le plus genereux en quota gratuit (bien plus
+// que "flash" standard), largement suffisant pour de courts brouillons
+// WhatsApp. Changez via la variable d'environnement GEMINI_MODEL si besoin.
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 
 export function isGeminiConfigured(): boolean {
   return Boolean(GEMINI_API_KEY);
