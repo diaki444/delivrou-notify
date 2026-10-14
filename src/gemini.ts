@@ -167,6 +167,25 @@ export async function generateProspectMessage(
   return callGemini(prompt);
 }
 
+/** Premier message personnalise pour un prospect precis (pas un modele generique par categorie). */
+export async function generateProspectPitch(prospect: {
+  name: string;
+  categoryLabel: string;
+  address?: string;
+}): Promise<{ ok: boolean; text?: string; error?: string }> {
+  const prompt =
+    `${COMPANY_CONTEXT}\n\n` +
+    `Tu rediges le tout premier message WhatsApp envoye a un commerce precis pour lui proposer de devenir ` +
+    `partenaire Delivrou. Commerce : "${prospect.name}", type "${prospect.categoryLabel}"` +
+    `${prospect.address ? `, situe a ${prospect.address}` : ""}. ` +
+    `Objectif : un message accrocheur et credible qui donne vraiment envie de repondre et de collaborer — pas ` +
+    `un message generique copie-colle. Nomme le commerce par son nom. Mets en avant un benefice concret et ` +
+    `pertinent pour CE type de commerce (gagner du temps, toucher plus de clients, livraison geree de A a Z...), ` +
+    `pas une liste de caracteristiques. Termine par une question simple et engageante pour demarrer l'echange. ` +
+    `1 a 2 phrases courtes maximum.\n\n${FORMAT_RULES}`;
+  return callGemini(prompt);
+}
+
 export interface ProspectContext {
   isProspect: boolean;
   bucketLabel?: string;

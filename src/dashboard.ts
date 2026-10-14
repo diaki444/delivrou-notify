@@ -16,6 +16,7 @@ import {
   countProspectsByBucket,
   getSuggestedReply,
   clearSuggestedReply,
+  setSuggestedReply,
   findProspectByPhone,
   formatJidLabel,
   markChatViewed,
@@ -24,7 +25,7 @@ import {
 import { sendWithGuards, queueLength } from "./send-queue.js";
 import { searchPlaces, phoneToDigits, isPlacesConfigured } from "./places.js";
 import { CATEGORY_ORDER, CATEGORY_LABELS, DEFAULT_TEMPLATES, personalizeMessage, type ProspectCategory } from "./categories.js";
-import { isGeminiConfigured, generateProspectMessage } from "./gemini.js";
+import { isGeminiConfigured, generateProspectMessage, generateProspectPitch } from "./gemini.js";
 import {
   isDashboardConfigured,
   checkPassword,
@@ -37,6 +38,11 @@ import {
 } from "./auth.js";
 
 export const dashboardRouter = Router();
+
+// Evite de relancer une generation IA pour le meme prospect a chaque
+// chargement/actualisation de la page pendant qu'une generation est deja en
+// cours (le polling automatique de la conversation recharge toutes les 4s).
+const pitchGenerationInFlight = new Set<string>();
 
 function escapeHtml(s: string): string {
   return s
@@ -527,14 +533,30 @@ dashboardRouter.get("/chat/:jid", (req, res) => {
   const prospect = !chat?.name ? findProspectByPhone(jid.split("@")[0]) : undefined;
   const name = chat?.name || prospect?.name || formatJidLabel(jid);
   const suggestion = getSuggestedReply(jid);
-  // Conversation pas encore commencee avec un prospect connu : pre-remplit
-  // le champ avec le message de prospection de sa categorie (deja utilise
-  // pour les envois groupes), pour ne pas repartir d'une page blanche.
+  // Conversation pas encore commencee avec un prospect connu : en attendant
+  // un message personnalise par l'IA (genere en arriere-plan ci-dessous,
+  // accrocheur et specifique a ce commerce), on pre-remplit tout de suite
+  // avec le modele generique de sa categorie pour ne pas partir d'un champ
+  // vide pendant la generation.
   const prospectDraft =
     !suggestion && msgs.length === 0 && prospect
       ? personalizeMessage(DEFAULT_TEMPLATES[prospect.bucket], prospect.name)
       : undefined;
   const draftText = suggestion || prospectDraft;
+
+  if (!suggestion && msgs.length === 0 && prospect && isGeminiConfigured() && !pitchGenerationInFlight.has(jid)) {
+    pitchGenerationInFlight.add(jid);
+    void generateProspectPitch({
+      name: prospect.name,
+      categoryLabel: CATEGORY_LABELS[prospect.bucket],
+      address: prospect.address,
+    })
+      .then((result) => {
+        if (result.ok && result.text) setSuggestedReply(jid, result.text);
+      })
+      .catch(() => {})
+      .finally(() => pitchGenerationInFlight.delete(jid));
+  }
 
   let lastDay = "";
   const bubbles = msgs
