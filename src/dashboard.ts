@@ -128,11 +128,16 @@ function shell(
     color-scheme: dark;
   }
   * { box-sizing: border-box; }
-  html, body { height: 100%; }
-  body { margin: 0; background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  html, body { height: 100vh; height: 100dvh; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; overflow: hidden; }
   a { color: inherit; }
-  .shell { display: block; min-height: 100%; }
-  .app { max-width: 480px; margin: 0 auto; min-height: 100%; display: flex; flex-direction: column; position: relative; }
+  /* Hauteur fixee (pas juste min-height) sur mobile : sans ca, c'est toute
+     la page qui defile au lieu de la zone de messages/liste uniquement, ce
+     qui empeche le defilement automatique vers le dernier message et peut
+     faire chevaucher des elements fixes (bouton notifications, barre
+     d'onglets). */
+  .shell { display: block; height: 100%; }
+  .app { max-width: 480px; margin: 0 auto; height: 100%; display: flex; flex-direction: column; position: relative; }
   .desktop-sidebar { display: none; }
 
   /* Version bureau : l'appli reste pensee mobile-first, mais sur grand ecran
@@ -195,7 +200,8 @@ function shell(
 
   .section-label { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 6px; font-size: 13.5px; font-weight: 700; color: var(--fg); }
 
-  .list { flex: 1; overflow-y: auto; padding-bottom: 90px; }
+  .list { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 90px; }
+  .page-scroll { flex: 1; min-height: 0; overflow-y: auto; }
   .chat-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 16px; background: none; border: none; text-align: left; cursor: pointer; color: inherit; font: inherit; text-decoration: none; }
   .chat-row:active { background: var(--surface); }
   .avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; color: var(--accent-fg); background: var(--accent); flex: none; }
@@ -230,7 +236,7 @@ function shell(
   .chat-header-name { font-weight: 700; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .chat-header-sub { font-size: 11.5px; color: var(--fg-muted); }
 
-  .messages { flex: 1; overflow-y: auto; padding: 14px 12px; display: flex; flex-direction: column; gap: 2px; background: var(--bg); }
+  .messages { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 12px; display: flex; flex-direction: column; gap: 2px; background: var(--bg); }
   .day-sep { align-self: center; font-size: 11px; color: var(--fg-faint); background: var(--surface); padding: 3px 10px; border-radius: 999px; margin: 10px 0; }
   .bubble-row { display: flex; }
   .bubble-row.out { justify-content: flex-end; }
