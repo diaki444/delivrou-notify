@@ -36,23 +36,29 @@ function isOnQuotaCooldown(): boolean {
  * support) : a tenir a jour si l'offre evolue (zones, tarifs, horaires...).
  */
 const COMPANY_CONTEXT =
-  `Delivrou est une plateforme guineenne de livraison nee a Conakry, qui relie clients, commerces partenaires ` +
-  `(restaurants, pharmacies, epiceries) et livreurs independants. Slogan : "Delivrou, vite fait." ` +
-  `Siege a Sonfonia Gare, Conakry. Zones couvertes : Conakry et sa peripherie (13 communes), principalement ` +
-  `Kaloum, Dixinn, Ratoma, Matam et Matoto. Ouvert 7j/7 de 7h a 23h.\n\n` +
-  `Quatre services : Delivrou Repas (commande chez des restaurants partenaires et suivi jusqu'a la porte), ` +
-  `Delivrou Colis (document, cadeau ou marchandise, un ou plusieurs arrets, ou un livreur fait les achats ` +
-  `pour le client), Delivrou Pharmacie (produits de pharmacie livres) et Delivrou Epicerie (courses du ` +
-  `quotidien).\n\n` +
-  `Deux publics : (1) les commerces partenaires (restaurants, pharmacies, epiceries) qui confient leurs ` +
-  `livraisons a des livreurs Delivrou plutot que de gerer leur propre logistique ; (2) les clients finaux qui ` +
-  `commandent et suivent leur livraison en temps reel, avec un code a 4 chiffres pour confirmer la remise en ` +
-  `main propre.\n\n` +
-  `Paiement : Orange Money, MTN Mobile Money, ou especes. Pour un repas, le client paie directement le ` +
-  `restaurant via son code marchand OM/MoMo affiche dans l'appli. Pour un colis, paiement OM a la commande ou ` +
-  `especes a la livraison. Le prix total (frais de livraison inclus) est toujours affiche avant de valider la ` +
-  `commande, sans surprise.\n\n` +
-  `Delai de livraison typique : entre 30 min et 1h30 selon la distance et l'heure. Annulation gratuite dans les ` +
+  `Delivrou est une plateforme guineenne de livraison nee a Conakry, qui relie clients, commerces et livreurs ` +
+  `independants verifies. Slogan : "Delivrou, vite fait." Siege a Sonfonia Gare, Conakry. Livraison de colis ` +
+  `partout a Conakry, 7j/7 de 7h a 23h. Site : www.delivrou.com (toujours avec www).\n\n` +
+  `SERVICE OUVERT AUJOURD'HUI : uniquement Delivrou Colis (document, cadeau ou marchandise ; modes Standard, ` +
+  `Multi-colis et Recuperation). Repas, Pharmacie et Epicerie sont "bientot" : ne jamais les presenter comme ` +
+  `disponibles ; a un commerce de ces secteurs, on parle d'un lancement en preparation et de partenaires recherches.\n\n` +
+  `Commander un colis, en 4 etapes dans l'appli : (1) depart : commune + point de repere (il n'y a pas d'adresse ` +
+  `postale en Guinee) ou bouton "Me localiser" ; (2) destinataire : nom, numero, commune, repere ; (3) colis : ` +
+  `description + photo, qui sert de preuve en cas de dommage ; (4) paiement. Le prix depend du trajet et s'affiche ` +
+  `toujours avant de valider, sans surprise.\n\n` +
+  `Securite : livreurs verifies (identite controlee par photo), suivi en direct sur la carte, code PIN de retrait ` +
+  `donne au livreur quand il recupere le colis, puis code de livraison a 4 chiffres que le destinataire donne au ` +
+  `livreur a la remise. Notation du livreur apres la course.\n\n` +
+  `Paiement : Orange Money ou MTN MoMo dans l'appli, ou "a l'arrivee" par QR code Mobile Money. Ne jamais annoncer ` +
+  `le paiement en especes (decision pas encore prise) : si on le demande, dire que pour l'instant c'est par Mobile ` +
+  `Money, plus sur pour le client et le livreur.\n\n` +
+  `Appli iPhone : App Store. Android : passer par www.delivrou.com en attendant la validation du Play Store. ` +
+  `Parrainage : 50 Deli-points par parrainage = 5 000 GNF.\n\n` +
+  `Interdits dans toute reponse : promettre un delai precis ou un prix precis (renvoyer vers l'appli, qui affiche ` +
+  `le prix et l'heure d'arrivee estimee), critiquer un concurrent, faux avis, tirage au sort, contenu religieux, ` +
+  `demander un code ou des informations personnelles dans un echange non prive. Reclamation grave, demande de ` +
+  `partenariat important ou question de prix negocie : proposer qu'Ibrahima rappelle.\n\n` +
+  `Annulation gratuite dans les ` +
   `10 minutes suivant la commande ; au-dela, si le livreur est deja en route, des frais de 5 000 GNF sont dus ` +
   `(retenus automatiquement si paiement Orange Money, sinon une dette est creee sur le compte client a regler ` +
   `avant la prochaine commande). En cas de 2 dettes impayees ou plus, le compte est bloque jusqu'au reglement ` +
