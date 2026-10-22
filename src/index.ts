@@ -30,6 +30,10 @@ if (!isDashboardConfigured()) {
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+// Manifest, icones et service worker pour pouvoir installer le tableau de
+// bord sur l'ecran d'accueil du telephone (PWA) et recevoir des
+// notifications push.
+app.use(express.static(path.join(process.cwd(), "public")));
 
 function requireAuth(req: Request, res: Response, next: NextFunction) {
   if (!NOTIFY_SECRET) {

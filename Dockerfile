@@ -7,6 +7,7 @@ RUN npm install --omit=dev
 
 COPY tsconfig.json ./
 COPY src ./src
+COPY public ./public
 RUN npm install --include=dev && npm run build && npm prune --omit=dev
 
 # auth_info/ doit survivre aux redeploiements : montez un volume persistant

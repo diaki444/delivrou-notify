@@ -13,6 +13,7 @@ import makeWASocket, {
 import { recordMessage, upsertChat, getMessages, getChat, setSuggestedReply, findProspectByPhone } from "./store.js";
 import { isGeminiConfigured, suggestReply } from "./gemini.js";
 import { CATEGORY_LABELS } from "./categories.js";
+import { notifyAllSubscriptions } from "./push.js";
 
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
 
@@ -130,8 +131,14 @@ class WhatsAppClient {
         Date.now(),
     });
 
-    if (!fromMe && isGeminiConfigured()) {
-      void this.generateReplySuggestion(jid);
+    if (!fromMe) {
+      if (isGeminiConfigured()) void this.generateReplySuggestion(jid);
+      const displayName = this.contactNames.get(jid) || senderName || getChat(jid)?.name;
+      void notifyAllSubscriptions({
+        title: displayName || "Nouveau message WhatsApp",
+        body: text.slice(0, 140),
+        url: `/dashboard/chat/${encodeURIComponent(jid)}`,
+      }).catch(() => {});
     }
   }
 

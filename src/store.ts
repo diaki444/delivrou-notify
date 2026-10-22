@@ -57,6 +57,13 @@ export interface Prospect {
   contacted: boolean;
 }
 
+/** Abonnement Web Push d'un appareil (telephone avec l'appli installee sur l'ecran d'accueil). */
+export interface StoredPushSubscription {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  addedAt: number;
+}
+
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
 const DATA_FILE = path.join(AUTH_DIR, "dashboard_data.json");
 
@@ -70,6 +77,7 @@ interface DiskShape {
   templates: MessageTemplate[];
   prospects: Prospect[];
   suggestedReplies: Record<string, string>;
+  pushSubscriptions: StoredPushSubscription[];
 }
 
 let chats = new Map<string, ChatMeta>();
@@ -78,6 +86,7 @@ let sendLog: SendLogEntry[] = [];
 let templates: MessageTemplate[] = [];
 let prospects: Prospect[] = [];
 let suggestedReplies = new Map<string, string>();
+let pushSubscriptions: StoredPushSubscription[] = [];
 
 function load() {
   try {
@@ -94,6 +103,7 @@ function load() {
       bucket: p.bucket || classifyCategory(p.category, p.query),
     }));
     suggestedReplies = new Map(Object.entries(parsed.suggestedReplies || {}));
+    pushSubscriptions = parsed.pushSubscriptions || [];
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error("[delivrou-notify] Impossible de charger l'historique sauvegarde:", err);
@@ -114,6 +124,7 @@ function scheduleSave() {
         templates,
         prospects,
         suggestedReplies: Object.fromEntries(suggestedReplies),
+        pushSubscriptions,
       };
       // Ecriture atomique (fichier temporaire puis renommage) : si le
       // service est interrompu en pleine ecriture (redemarrage, crash),
@@ -308,4 +319,21 @@ export function setSuggestedReply(jid: string, text: string) {
 
 export function clearSuggestedReply(jid: string) {
   if (suggestedReplies.delete(jid)) scheduleSave();
+}
+
+/** Abonnements Web Push (un par appareil/telephone ayant active les notifications). */
+export function listPushSubscriptions(): StoredPushSubscription[] {
+  return pushSubscriptions;
+}
+
+export function addPushSubscription(sub: Omit<StoredPushSubscription, "addedAt">) {
+  if (pushSubscriptions.some((s) => s.endpoint === sub.endpoint)) return;
+  pushSubscriptions.push({ ...sub, addedAt: Date.now() });
+  scheduleSave();
+}
+
+export function removePushSubscriptionByEndpoint(endpoint: string) {
+  const before = pushSubscriptions.length;
+  pushSubscriptions = pushSubscriptions.filter((s) => s.endpoint !== endpoint);
+  if (pushSubscriptions.length !== before) scheduleSave();
 }

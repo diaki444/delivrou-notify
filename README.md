@@ -71,6 +71,25 @@ L'historique (conversations + journal) est sauvegarde dans `auth_info/dashboard_
 
 > Note : seuls les messages recus ou envoyes **depuis que le service tourne** apparaissent (WhatsApp Web ne transmet pas tout l'historique d'un compte a un client tiers comme Baileys).
 
+### Installer sur l'ecran d'accueil du telephone + notifications push
+
+Le tableau de bord est une PWA (Progressive Web App) : il peut s'installer comme une vraie appli, avec une icone sur l'ecran d'accueil, et recevoir des notifications meme fermee.
+
+**Installer :**
+- **Android (Chrome)** : ouvrir `https://notify.delivrou.com/dashboard`, menu `⋮` > *Ajouter a l'ecran d'accueil* (ou une bannière d'installation apparait automatiquement).
+- **iPhone (Safari)** : ouvrir le site dans Safari (pas Chrome, pas dans l'appli WhatsApp), bouton *Partager* > *Sur l'ecran d'accueil*.
+
+**Activer les notifications :**
+Une fois l'appli installee et ouverte depuis son icone, un bouton *🔔 Activer les notifications* apparait en bas de l'ecran — il suffit d'appuyer dessus et d'autoriser les notifications quand le telephone le demande. Une notification arrive ensuite a chaque message recu, meme appli fermee, avec un lien direct vers la conversation.
+
+⚠️ Sur iPhone, les notifications push ne fonctionnent **que si l'appli a ete installee sur l'ecran d'accueil** (iOS 16.4+) — ca ne marche pas dans un simple onglet Safari.
+
+Necessite `VAPID_PUBLIC_KEY` et `VAPID_PRIVATE_KEY` (voir `.env.example`), generees une seule fois avec :
+```bash
+npx web-push generate-vapid-keys
+```
+Laissez ces variables vides pour desactiver les notifications push (le reste du tableau de bord continue de marcher normalement).
+
 ## API
 
 Toutes les routes (sauf `/health`) demandent l'en-tete `x-notify-key: <NOTIFY_SECRET>`.

@@ -21,11 +21,14 @@ import {
   formatJidLabel,
   markChatViewed,
   isChatUnread,
+  addPushSubscription,
+  removePushSubscriptionByEndpoint,
 } from "./store.js";
 import { sendWithGuards, queueLength } from "./send-queue.js";
 import { searchPlaces, phoneToDigits, isPlacesConfigured } from "./places.js";
 import { CATEGORY_ORDER, CATEGORY_LABELS, DEFAULT_TEMPLATES, personalizeMessage, type ProspectCategory } from "./categories.js";
 import { isGeminiConfigured, generateProspectMessage, generateProspectPitch } from "./gemini.js";
+import { getVapidPublicKey } from "./push.js";
 import {
   isDashboardConfigured,
   checkPassword,
@@ -90,6 +93,13 @@ function shell(
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="format-detection" content="telephone=no" />
+<link rel="manifest" href="/manifest.json" />
+<link rel="icon" href="/icon-192.png" />
+<link rel="apple-touch-icon" href="/icon-192.png" />
+<meta name="theme-color" content="#3a1a10" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Delivrou" />
 <title>${escapeHtml(title)} — delivrou-notify</title>
 <style>
   html, body { overflow-x: hidden; max-width: 100%; }
@@ -202,6 +212,8 @@ function shell(
   .fab { position: fixed; right: 20px; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); width: 52px; height: 52px; border-radius: 50%; background: var(--accent); color: var(--accent-fg); border: none; display: flex; align-items: center; justify-content: center; box-shadow: 0 6px 18px rgba(255,122,61,.35); cursor: pointer; z-index: 6; text-decoration: none; }
   .fab svg { width: 22px; height: 22px; }
   .fab-wrap { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .push-enable-btn { position: fixed; left: 14px; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); z-index: 6; align-items: center; gap: 6px; padding: 10px 14px; border-radius: 999px; border: 1px solid var(--accent); background: var(--surface); color: var(--accent); font-size: 12.5px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
+  @media (min-width: 860px) { .push-enable-btn { bottom: 20px; } }
 
   .composer { display: flex; gap: 8px; padding: 10px 12px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); background: var(--surface); border-top: 1px solid var(--border); }
   .composer input[type=text] { flex: 1; border: 1px solid var(--border); background: var(--surface-2); border-radius: 20px; padding: 10px 14px; font-size: 16px; color: var(--fg); min-width: 0; }
@@ -307,6 +319,68 @@ ${sidebarHtml}
 ${bodyHtml}
 </div>
 </div>
+<button id="push-enable-btn" class="push-enable-btn" type="button" style="display:none">🔔 Activer les notifications</button>
+<script>
+(function () {
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.register("/sw.js").catch(function () {});
+
+  if (!("PushManager" in window) || !("Notification" in window)) return;
+  var btn = document.getElementById("push-enable-btn");
+  if (!btn) return;
+
+  function urlBase64ToUint8Array(base64String) {
+    var padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    var base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+    var raw = window.atob(base64);
+    var arr = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+    return arr;
+  }
+
+  function refreshButton() {
+    if (localStorage.getItem("dn_push_enabled") === "1" || Notification.permission === "denied") {
+      btn.style.display = "none";
+    } else {
+      btn.style.display = "inline-flex";
+    }
+  }
+
+  btn.addEventListener("click", function () {
+    btn.disabled = true;
+    fetch("/dashboard/push/vapid-public-key")
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.publicKey) throw new Error("push non configure");
+        return navigator.serviceWorker.ready.then(function (reg) {
+          return reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(data.publicKey),
+          });
+        });
+      })
+      .then(function (sub) {
+        return fetch("/dashboard/push/subscribe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sub),
+        });
+      })
+      .then(function () {
+        localStorage.setItem("dn_push_enabled", "1");
+        refreshButton();
+      })
+      .catch(function () {
+        alert("Impossible d'activer les notifications. Verifiez que l'appli est bien installee sur l'ecran d'accueil et reessayez.");
+      })
+      .finally(function () {
+        btn.disabled = false;
+      });
+  });
+
+  refreshButton();
+})();
+</script>
 </body>
 </html>`;
 }
@@ -402,6 +476,26 @@ dashboardRouter.get("/logout", (req, res) => {
 });
 
 dashboardRouter.use(requireDashboardAuth);
+
+dashboardRouter.get("/push/vapid-public-key", (_req, res) => {
+  res.json({ publicKey: getVapidPublicKey() || null });
+});
+
+dashboardRouter.post("/push/subscribe", (req, res) => {
+  const body = req.body as { endpoint?: string; keys?: { p256dh?: string; auth?: string } };
+  if (!body?.endpoint || !body.keys?.p256dh || !body.keys?.auth) {
+    res.status(400).json({ ok: false, error: "Abonnement push invalide" });
+    return;
+  }
+  addPushSubscription({ endpoint: body.endpoint, keys: { p256dh: body.keys.p256dh, auth: body.keys.auth } });
+  res.json({ ok: true });
+});
+
+dashboardRouter.post("/push/unsubscribe", (req, res) => {
+  const endpoint = String(req.body?.endpoint || "");
+  if (endpoint) removePushSubscriptionByEndpoint(endpoint);
+  res.json({ ok: true });
+});
 
 dashboardRouter.get("/", (req, res) => {
   const safety = getSafetyStatus();
