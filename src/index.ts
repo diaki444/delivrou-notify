@@ -8,7 +8,7 @@ import { getSafetyStatus } from "./safety.js";
 import { sendWithGuards, queueLength } from "./send-queue.js";
 import { dashboardRouter } from "./dashboard.js";
 import { isDashboardConfigured } from "./auth.js";
-import { startStatsCollector, collectNow, getLatestByAccount, weeklySeries, getLastRun } from "./stats.js";
+import { startStatsCollector, collectNow, getLatestByPlatform, weeklySeries, getLastRun } from "./stats.js";
 import { probe as zernioProbe } from "./zernio.js";
 
 const PORT = Number(process.env.PORT || 3300);
@@ -75,7 +75,7 @@ app.get("/status", requireAuth, (_req, res) => {
 // Chiffres a jour : dernier releve par compte + serie hebdomadaire pour le
 // graphique du QG marketing.
 app.get("/stats", requireAuth, (_req, res) => {
-  res.json({ ok: true, lastRun: getLastRun(), accounts: getLatestByAccount(), semaines: weeklySeries() });
+  res.json({ ok: true, lastRun: getLastRun(), plateformes: getLatestByPlatform(), semaines: weeklySeries() });
 });
 
 // Force une collecte immediate, sans attendre le prochain passage horaire.

@@ -106,7 +106,13 @@ export async function listAccounts(): Promise<ZernioResult<ZernioAccount[]>> {
     ? raw
     : (["data", "accounts", "results", "items"] as const).map((k) => (raw as Record<string, unknown>)[k]).find(Array.isArray);
   if (!Array.isArray(arr)) return { ok: false, error: `Reponse inattendue (pas de liste de comptes) depuis ${r.via}.` };
-  return { ok: true, data: arr as ZernioAccount[], via: r.via };
+  // Zernio nomme l'identifiant `_id` (style MongoDB). On expose aussi `id`
+  // pour que le reste du code n'ait pas a connaitre ce detail.
+  const normalised = (arr as Record<string, unknown>[]).map((a) => ({
+    ...a,
+    id: String(a.id ?? a._id ?? ""),
+  })) as ZernioAccount[];
+  return { ok: true, data: normalised, via: r.via };
 }
 
 /** Statistiques d'abonnes pour un compte (ou tous si accountId omis). */
