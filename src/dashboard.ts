@@ -215,11 +215,11 @@ function shell(
   .push-enable-btn { position: fixed; left: 14px; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); z-index: 6; align-items: center; gap: 6px; padding: 10px 14px; border-radius: 999px; border: 1px solid var(--accent); background: var(--surface); color: var(--accent); font-size: 12.5px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
   @media (min-width: 860px) { .push-enable-btn { bottom: 20px; } }
 
-  .composer { display: flex; gap: 8px; padding: 10px 12px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); background: var(--surface); border-top: 1px solid var(--border); }
-  .composer input[type=text] { flex: 1; border: 1px solid var(--border); background: var(--surface-2); border-radius: 20px; padding: 10px 14px; font-size: 16px; color: var(--fg); min-width: 0; }
-  .composer input::placeholder { color: var(--fg-faint); }
-  .composer input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .send-btn { width: 38px; height: 38px; border-radius: 50%; border: none; background: var(--accent); color: var(--accent-fg); cursor: pointer; flex: none; display: flex; align-items: center; justify-content: center; }
+  .composer { display: flex; gap: 8px; padding: 10px 12px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); background: var(--surface); border-top: 1px solid var(--border); align-items: flex-end; }
+  .composer textarea { flex: 1; border: 1px solid var(--border); background: var(--surface-2); border-radius: 20px; padding: 10px 14px; font-size: 16px; line-height: 1.35; color: var(--fg); min-width: 0; resize: none; max-height: 160px; overflow-y: auto; font-family: inherit; }
+  .composer textarea::placeholder { color: var(--fg-faint); }
+  .composer textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .send-btn { width: 38px; height: 38px; border-radius: 50%; border: none; background: var(--accent); color: var(--accent-fg); cursor: pointer; flex: none; display: flex; align-items: center; justify-content: center; margin-bottom: 1px; }
   .send-btn svg { width: 15px; height: 15px; }
 
   .chat-header { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 6px; background: var(--surface); border-bottom: 1px solid var(--border); }
@@ -689,11 +689,33 @@ dashboardRouter.get("/chat/:jid", (req, res) => {
               </div>`
             : ""
       }</div>
-      <form class="composer" method="post" action="/dashboard/send">
+      <form class="composer" method="post" action="/dashboard/send" id="reply-form">
         <input type="hidden" name="jid" value="${escapeHtml(jid)}" />
-        <input type="text" name="text" placeholder="Répondre..." value="${escapeHtml(draftText || "")}" data-draft="${escapeHtml(draftText || "")}" required />
+        <textarea name="text" placeholder="Répondre..." rows="1" data-draft="${escapeHtml(draftText || "")}" required>${escapeHtml(draftText || "")}</textarea>
         <button class="send-btn" type="submit" aria-label="Envoyer">${ICONS.send}</button>
       </form>
+      <script>
+        // Champ de reponse qui s'agrandit avec le texte tape (au lieu d'une
+        // seule ligne qui defile horizontalement), et Entree envoie le
+        // message (Maj+Entree pour aller a la ligne).
+        (function () {
+          var textarea = document.querySelector('#reply-form textarea[name="text"]');
+          var form = document.getElementById("reply-form");
+          if (!textarea || !form) return;
+          function autoGrow() {
+            textarea.style.height = "auto";
+            textarea.style.height = Math.min(textarea.scrollHeight, 160) + "px";
+          }
+          textarea.addEventListener("input", autoGrow);
+          textarea.addEventListener("keydown", function (e) {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              if (textarea.value.trim()) form.submit();
+            }
+          });
+          autoGrow();
+        })();
+      </script>
       <script>
         // Descend automatiquement au dernier message a l'ouverture de la
         // conversation (et apres chaque mise a jour). On attend que la mise
@@ -717,7 +739,7 @@ dashboardRouter.get("/chat/:jid", (req, res) => {
         // Ne touche jamais au champ de reponse si l'utilisateur est en
         // train d'y taper quelque chose.
         function refreshChat() {
-          var input = document.querySelector('.composer input[name="text"]');
+          var input = document.querySelector('#reply-form textarea[name="text"]');
           if (input && input.value.trim() && input.value !== input.getAttribute("data-draft")) return;
           fetch(window.location.href)
             .then(function (r) { return r.text(); })
@@ -734,10 +756,11 @@ dashboardRouter.get("/chat/:jid", (req, res) => {
               var oldDraftBox = document.getElementById("draft-box");
               if (newDraftBox && oldDraftBox && newDraftBox.innerHTML !== oldDraftBox.innerHTML) {
                 oldDraftBox.innerHTML = newDraftBox.innerHTML;
-                var newInput = doc.querySelector('.composer input[name="text"]');
+                var newInput = doc.querySelector('#reply-form textarea[name="text"]');
                 if (input && newInput && (!input.value || input.value === input.getAttribute("data-draft"))) {
                   input.value = newInput.value;
                   input.setAttribute("data-draft", newInput.value);
+                  input.dispatchEvent(new Event("input"));
                 }
               }
               var newSidebar = doc.getElementById("ds-chats");
