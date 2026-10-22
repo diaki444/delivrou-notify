@@ -85,6 +85,7 @@ function shell(
   bodyHtml: string,
   active?: "chats" | "logs" | "prospects",
   activeJid?: string,
+  showPushButton = false,
 ): string {
   const sidebarHtml = active ? desktopSidebar(active, activeJid) : "";
   return `<!doctype html>
@@ -176,7 +177,7 @@ function shell(
   .ds-chat .unread-dot { margin-left: auto; }
   .ds-empty { padding: 10px 16px; font-size: 12.5px; color: var(--fg-faint); }
 
-  .topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: linear-gradient(165deg, var(--header-2), var(--header)); padding: 10px 14px 16px; }
+  .topbar { flex: none; z-index: 5; background: linear-gradient(165deg, var(--header-2), var(--header)); padding: calc(10px + env(safe-area-inset-top, 0px)) 14px 16px; }
   .topbar-row { display: flex; align-items: center; gap: 10px; }
   .topbar-mark { width: 30px; height: 30px; border-radius: 8px; background: rgba(0,0,0,.32); color: var(--header-fg); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px; flex: none; }
   .topbar h1 { flex: 1; margin: 0; font-size: 18px; font-weight: 800; letter-spacing: -0.01em; color: var(--header-fg); }
@@ -228,7 +229,7 @@ function shell(
   .send-btn { width: 38px; height: 38px; border-radius: 50%; border: none; background: var(--accent); color: var(--accent-fg); cursor: pointer; flex: none; display: flex; align-items: center; justify-content: center; margin-bottom: 1px; }
   .send-btn svg { width: 15px; height: 15px; }
 
-  .chat-header { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 6px; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .chat-header { flex: none; z-index: 5; display: flex; align-items: center; gap: 10px; padding: calc(10px + env(safe-area-inset-top, 0px)) 10px 10px 6px; background: var(--surface); border-bottom: 1px solid var(--border); }
   .back-btn { border: none; background: none; color: var(--fg); cursor: pointer; padding: 6px; flex: none; display: flex; }
   .back-btn svg { width: 20px; height: 20px; }
   .chat-header .avatar { width: 32px; height: 32px; font-size: 12px; flex: none; }
@@ -325,7 +326,7 @@ ${sidebarHtml}
 ${bodyHtml}
 </div>
 </div>
-<button id="push-enable-btn" class="push-enable-btn" type="button" style="display:none">🔔 Activer les notifications</button>
+${showPushButton ? `<button id="push-enable-btn" class="push-enable-btn" type="button" style="display:none">🔔 Activer les notifications</button>` : ""}
 <script>
 (function () {
   if (!("serviceWorker" in navigator)) return;
@@ -483,6 +484,15 @@ dashboardRouter.get("/logout", (req, res) => {
 
 dashboardRouter.use(requireDashboardAuth);
 
+// L'appli installee (PWA en mode standalone) peut etre plus agressive a
+// reutiliser une page en cache que l'onglet d'un navigateur normal : on
+// force explicitement une page fraiche a chaque chargement, pour ne jamais
+// afficher un ecran perime (statut WhatsApp, badges, nouveaux messages...).
+dashboardRouter.use((_req, res, next) => {
+  res.set("Cache-Control", "no-store, must-revalidate");
+  next();
+});
+
 dashboardRouter.get("/push/vapid-public-key", (_req, res) => {
   res.json({ publicKey: getVapidPublicKey() || null });
 });
@@ -586,6 +596,8 @@ dashboardRouter.get("/", (req, res) => {
         setInterval(refreshList, 10000);
       </script>`,
       "chats",
+      undefined,
+      true,
     ),
   );
 });
