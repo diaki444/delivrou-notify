@@ -202,7 +202,12 @@ app.use("/dashboard", dashboardRouter);
 // QG marketing (calendrier des posts, reponses, croissance, strategie).
 // Sans la barre finale, le navigateur resout les chemins relatifs de la page
 // (data/, media/, logo.png) a la racine du site au lieu du dossier /qg/.
-app.get("/qg", (_req, res) => res.redirect(302, "/qg/"));
+app.get("/qg", (req, res, next) => {
+  // Express traite `/qg` et `/qg/` comme la meme route : sans ce test, la
+  // redirection se renverrait vers elle-meme en boucle.
+  if (req.originalUrl.split("?")[0].endsWith("/")) return next();
+  res.redirect(302, "/qg/");
+});
 app.use("/qg", qgRouter);
 
 app.listen(PORT, () => {
