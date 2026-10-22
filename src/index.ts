@@ -7,6 +7,7 @@ import { whatsapp } from "./whatsapp-client.js";
 import { getSafetyStatus } from "./safety.js";
 import { sendWithGuards, queueLength } from "./send-queue.js";
 import { dashboardRouter } from "./dashboard.js";
+import { qgRouter } from "./qg.js";
 import { isDashboardConfigured } from "./auth.js";
 import { startStatsCollector, collectNow, getLatestByPlatform, weeklySeries, getLastRun } from "./stats.js";
 import { probe as zernioProbe } from "./zernio.js";
@@ -198,6 +199,8 @@ app.post("/send", requireAuth, async (req, res) => {
 // Tableau de bord web (conversations, envoi manuel, journal). Desactive
 // automatiquement si DASHBOARD_PASSWORD n'est pas configure.
 app.use("/dashboard", dashboardRouter);
+// QG marketing (calendrier des posts, reponses, croissance, strategie).
+app.use("/qg", qgRouter);
 
 app.listen(PORT, () => {
   // eslint-disable-next-line no-console
