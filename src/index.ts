@@ -200,6 +200,9 @@ app.post("/send", requireAuth, async (req, res) => {
 // automatiquement si DASHBOARD_PASSWORD n'est pas configure.
 app.use("/dashboard", dashboardRouter);
 // QG marketing (calendrier des posts, reponses, croissance, strategie).
+// Sans la barre finale, le navigateur resout les chemins relatifs de la page
+// (data/, media/, logo.png) a la racine du site au lieu du dossier /qg/.
+app.get("/qg", (_req, res) => res.redirect(302, "/qg/"));
 app.use("/qg", qgRouter);
 
 app.listen(PORT, () => {
