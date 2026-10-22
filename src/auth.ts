@@ -83,7 +83,11 @@ export function requireDashboardAuth(req: Request, res: Response, next: NextFunc
   }
   const token = getSessionTokenFromRequest(req);
   if (!isValidSession(token)) {
-    res.redirect("/dashboard/login");
+    // On garde la page demandee pour y revenir juste apres la connexion :
+    // sinon un lien direct (/qg) renvoie toujours sur le tableau de bord.
+    const wanted = req.originalUrl || "";
+    const next = wanted.startsWith("/") && !wanted.startsWith("//") ? `?next=${encodeURIComponent(wanted)}` : "";
+    res.redirect(`/dashboard/login${next}`);
     return;
   }
   next();

@@ -444,6 +444,12 @@ dashboardRouter.get("/login", (req, res) => {
     return;
   }
   const error = req.query.error ? `<div class="err-banner">Mot de passe incorrect.</div>` : "";
+  // Destination demandee avant la connexion. On n'accepte qu'un chemin
+  // interne : jamais une URL absolue, qui permettrait une redirection
+  // vers un autre site depuis notre page de connexion.
+  const rawNext = String(req.query.next || "");
+  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "";
+  const nextField = next ? `<input type="hidden" name="next" value="${escapeHtml(next)}" />` : "";
   res.send(
     shell(
       "Connexion",
@@ -455,6 +461,7 @@ dashboardRouter.get("/login", (req, res) => {
         </div>
         ${error}
         <form method="post" action="/dashboard/login">
+          ${nextField}
           <label class="field-label" for="password">Mot de passe</label>
           <input class="text-input" type="password" id="password" name="password" placeholder="••••••••" autofocus style="margin-bottom:14px" />
           <button class="primary-btn" type="submit">Entrer</button>
@@ -467,13 +474,16 @@ dashboardRouter.get("/login", (req, res) => {
 
 dashboardRouter.post("/login", (req, res) => {
   const password = String(req.body?.password || "");
+  const rawNext = String(req.body?.next || "");
+  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/dashboard";
   if (!checkPassword(password)) {
-    res.redirect("/dashboard/login?error=1");
+    const keep = next !== "/dashboard" ? `&next=${encodeURIComponent(next)}` : "";
+    res.redirect(`/dashboard/login?error=1${keep}`);
     return;
   }
   const token = createSession();
   setSessionCookie(res, token);
-  res.redirect("/dashboard");
+  res.redirect(next);
 });
 
 dashboardRouter.get("/logout", (req, res) => {
