@@ -8,6 +8,8 @@ import { getSafetyStatus } from "./safety.js";
 import { sendWithGuards, queueLength } from "./send-queue.js";
 import { dashboardRouter } from "./dashboard.js";
 import { isDashboardConfigured } from "./auth.js";
+import { startStatsCollector, collectNow, getLatestByAccount, weeklySeries, getLastRun } from "./stats.js";
+import { probe as zernioProbe } from "./zernio.js";
 
 const PORT = Number(process.env.PORT || 3300);
 const NOTIFY_SECRET = process.env.NOTIFY_SECRET;
@@ -66,6 +68,26 @@ app.get("/status", requireAuth, (_req, res) => {
     queueLength: queueLength(),
     safety: getSafetyStatus(),
   });
+});
+
+// --- Statistiques des reseaux sociaux (via Zernio) ---
+
+// Chiffres a jour : dernier releve par compte + serie hebdomadaire pour le
+// graphique du QG marketing.
+app.get("/stats", requireAuth, (_req, res) => {
+  res.json({ ok: true, lastRun: getLastRun(), accounts: getLatestByAccount(), semaines: weeklySeries() });
+});
+
+// Force une collecte immediate, sans attendre le prochain passage horaire.
+app.post("/stats/collect", requireAuth, async (_req, res) => {
+  const r = await collectNow();
+  res.status(r.ok ? 200 : 502).json(r);
+});
+
+// Diagnostic : quels endpoints Zernio repondent, avec un extrait de reponse.
+// Ne revele jamais la cle API.
+app.get("/stats/probe", requireAuth, async (_req, res) => {
+  res.json(await zernioProbe());
 });
 
 // Page web pour scanner le QR code depuis un navigateur (plus fiable que les
@@ -155,6 +177,10 @@ app.listen(PORT, () => {
   console.log(`[delivrou-notify] API HTTP demarree sur le port ${PORT}`);
 });
 
+// Collecte horaire des statistiques Facebook / TikTok. Independante de
+// WhatsApp : elle tourne meme si la connexion WhatsApp est suspendue.
+startStatsCollector();
+
 if (process.env.WHATSAPP_DISABLED === "true") {
   // eslint-disable-next-line no-console
   console.error(
@@ -176,7 +202,7 @@ if (process.env.WHATSAPP_DISABLED === "true") {
       // la session doit etre effacee, pas les donnees du tableau de bord.
       if (fs.existsSync(authDir)) {
         for (const entry of fs.readdirSync(authDir)) {
-          if (entry === "dashboard_data.json") continue;
+          if (entry === "dashboard_data.json" || entry === "social_stats.json") continue;
           fs.rmSync(path.join(authDir, entry), { recursive: true, force: true });
         }
       }
