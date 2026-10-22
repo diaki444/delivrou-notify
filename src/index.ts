@@ -90,6 +90,33 @@ app.get("/stats/probe", requireAuth, async (_req, res) => {
   res.json(await zernioProbe());
 });
 
+// Lecture publique des chiffres agreges, pour alimenter le QG marketing
+// (une page publiee sur claude.ai ne peut pas envoyer d'en-tete
+// personnalise, donc pas de x-notify-key possible). Desactivee par defaut :
+// mettre STATS_PUBLIC=true pour l'ouvrir. N'expose que des agregats
+// (abonnes, portee, vues, engagement par semaine) : ni identifiants de
+// compte, ni jetons, ni conversations.
+app.get("/stats/public", (_req, res) => {
+  if (process.env.STATS_PUBLIC !== "true") {
+    res.status(404).json({ ok: false, error: "Not found" });
+    return;
+  }
+  const run = getLastRun();
+  res.set("Cache-Control", "public, max-age=600");
+  res.set("Access-Control-Allow-Origin", "*");
+  res.json({
+    ok: true,
+    maj: run ? new Date(run.at).toISOString() : null,
+    plateformes: getLatestByPlatform().map((p) => ({
+      platform: p.platform,
+      name: p.name,
+      followers: p.followers,
+      date: p.date,
+    })),
+    semaines: weeklySeries(),
+  });
+});
+
 // Page web pour scanner le QR code depuis un navigateur (plus fiable que les
 // logs en mode texte d'un panneau comme EasyPanel). Protegee par ?key=...
 // car un GET classique de navigateur ne permet pas d'envoyer un en-tete
