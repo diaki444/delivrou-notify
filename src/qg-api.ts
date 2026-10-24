@@ -32,6 +32,9 @@ import {
   findProspectByPhone,
 } from "./store.js";
 import { CATEGORY_LABELS, CATEGORY_ORDER, DEFAULT_TEMPLATES, personalizeMessage, type ProspectCategory } from "./categories.js";
+import { searchPlaces, phoneToDigits, isPlacesConfigured } from "./places.js";
+import { askGemini, isGeminiConfigured } from "./gemini.js";
+import { addProspects, listChats as listChatsForCount, isChatUnread as unread } from "./store.js";
 
 export const qgApiRouter = express.Router();
 qgApiRouter.use(express.json({ limit: "256kb" }));
@@ -160,4 +163,80 @@ qgApiRouter.post("/prospects/:id/delete", (req, res) => {
 qgApiRouter.get("/log", (_req, res) => {
   res.set("Cache-Control", "no-store");
   res.json({ ok: true, entries: listSendLog(200) });
+});
+
+/**
+ * Compteurs pour les pastilles d'onglet : ce qui a change depuis la derniere
+ * visite. Appele regulierement par le QG, donc volontairement leger.
+ */
+qgApiRouter.get("/counts", (_req, res) => {
+  const chats = listChatsForCount(200);
+  const log = listSendLog(200);
+  const dayAgo = Date.now() - 86400_000;
+  res.set("Cache-Control", "no-store");
+  res.json({
+    ok: true,
+    messages: chats.filter(unread).length,
+    journal: log.filter((e) => e.timestamp > dayAgo && e.status !== "sent").length,
+    prospects: listProspects(1000).filter((p) => !p.contacted).length,
+    connected: whatsapp.isConnected(),
+  });
+});
+
+/** Recherche de commerces reels a Conakry, ajoutes comme prospects. */
+qgApiRouter.post("/prospects/search", async (req, res) => {
+  const query = String(req.body?.query || "").trim();
+  if (!query) {
+    res.status(400).json({ ok: false, error: "Recherche vide." });
+    return;
+  }
+  if (!isPlacesConfigured()) {
+    res.status(503).json({ ok: false, error: "GOOGLE_PLACES_API_KEY non configuree sur le serveur." });
+    return;
+  }
+  const result = await searchPlaces(query);
+  if (!result.ok) {
+    res.status(502).json({ ok: false, error: result.error || "Recherche echouee." });
+    return;
+  }
+  // Un prospect sans numero n'est pas contactable : on l'ecarte tout de suite.
+  const withPhone = result.results
+    .map((r) => {
+      const phone = r.phone ? phoneToDigits(r.phone) : null;
+      return phone ? { id: r.id, name: r.name, phone, address: r.address, category: r.category } : null;
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null);
+  const { added, duplicates } = addProspects(query, withPhone);
+  res.json({ ok: true, trouves: result.results.length, added, duplicates });
+});
+
+/**
+ * Brouillons de reponse a un commentaire ou message recu sur Facebook,
+ * TikTok ou WhatsApp. Rien n'est jamais publie : le QG propose, un humain
+ * relit et envoie.
+ */
+qgApiRouter.post("/ai/reply", async (req, res) => {
+  if (!isGeminiConfigured()) {
+    res.status(503).json({ ok: false, error: "GEMINI_API_KEY non configuree sur le serveur." });
+    return;
+  }
+  const message = String(req.body?.message || "").trim();
+  const where = String(req.body?.where || "commentaire public").slice(0, 40);
+  const network = String(req.body?.network || "Facebook").slice(0, 20);
+  if (!message) {
+    res.status(400).json({ ok: false, error: "Message vide." });
+    return;
+  }
+  const base =
+    `Tu es le community manager de Delivrou. Voici un ${where} recu sur ${network} :\n"""${message.slice(0, 1500)}"""\n\n`;
+  const [court, complet] = await Promise.all([
+    askGemini(base + "Redige UNE reponse tres courte, une phrase, prete a envoyer."),
+    askGemini(base + "Redige UNE reponse un peu plus complete, deux phrases maximum, prete a envoyer."),
+  ]);
+  const reponses = [court, complet].filter((r) => r.ok && r.text).map((r) => r.text as string);
+  if (!reponses.length) {
+    res.status(502).json({ ok: false, error: court.error || complet.error || "Aucune proposition." });
+    return;
+  }
+  res.json({ ok: true, reponses });
 });

@@ -250,3 +250,12 @@ export async function suggestReply(
     `1 phrase par defaut, 2 maximum sauf si la question l'exige vraiment.\n\n${FORMAT_RULES}`;
   return callGemini(prompt);
 }
+
+/**
+ * Appel libre au modele, pour les usages hors conversation WhatsApp (par
+ * exemple repondre a un commentaire Facebook ou TikTok depuis le QG). Le
+ * contexte entreprise est deja inclus : l'appelant n'ajoute que sa consigne.
+ */
+export async function askGemini(instruction: string): Promise<{ ok: boolean; text?: string; error?: string }> {
+  return callGemini(`${COMPANY_CONTEXT}\n\n${instruction}\n\n${FORMAT_RULES}`);
+}
