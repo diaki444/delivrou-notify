@@ -7,6 +7,8 @@
  * sans jamais faire planter le reste du tableau de bord.
  */
 
+import { qgKnowledge } from "./knowledge.js";
+
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 // "flash-lite" est le modele le plus genereux en quota gratuit (bien plus
 // que "flash" standard), largement suffisant pour de courts brouillons
@@ -110,6 +112,11 @@ function sanitizeAiText(raw: string): string | null {
   return text;
 }
 
+function withKnowledge(prompt: string): string {
+  const k = qgKnowledge();
+  return k ? `${prompt}\n\n${k}` : prompt;
+}
+
 async function callGemini(prompt: string): Promise<{ ok: boolean; text?: string; error?: string }> {
   if (!GEMINI_API_KEY) {
     return { ok: false, error: "GEMINI_API_KEY non configurée sur le serveur." };
@@ -135,7 +142,7 @@ async function callGemini(prompt: string): Promise<{ ok: boolean; text?: string;
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
+            contents: [{ parts: [{ text: withKnowledge(prompt) }] }],
             generationConfig: { temperature: 0.6, maxOutputTokens: 2048, ...extraConfig },
           }),
         },

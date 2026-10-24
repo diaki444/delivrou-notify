@@ -34,6 +34,7 @@ import {
 import { CATEGORY_LABELS, CATEGORY_ORDER, DEFAULT_TEMPLATES, personalizeMessage, type ProspectCategory } from "./categories.js";
 import { searchPlaces, phoneToDigits, isPlacesConfigured } from "./places.js";
 import { askGemini, isGeminiConfigured } from "./gemini.js";
+import { responseStats, pendingChats } from "./metrics.js";
 import { addProspects, listChats as listChatsForCount, isChatUnread as unread } from "./store.js";
 
 export const qgApiRouter = express.Router();
@@ -239,4 +240,15 @@ qgApiRouter.post("/ai/reply", async (req, res) => {
     return;
   }
   res.json({ ok: true, reponses });
+});
+
+/**
+ * Reactivite de l'equipe : delai de reponse et conversations laissees sans
+ * reponse. C'est l'objectif « 100 % traites en moins de 24 h » du QG, rendu
+ * mesurable a partir des messages deja stockes.
+ */
+qgApiRouter.get("/metrics", (req, res) => {
+  const days = Math.min(90, Math.max(1, Number(req.query.days) || 14));
+  res.set("Cache-Control", "no-store");
+  res.json({ ok: true, reponse: responseStats(days), enAttente: pendingChats().slice(0, 20) });
 });
