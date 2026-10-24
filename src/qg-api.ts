@@ -30,6 +30,10 @@ import {
   deleteProspect,
   getSuggestedReply,
   findProspectByPhone,
+  getContactNote,
+  setContactNote,
+  allTags,
+  contactKey,
 } from "./store.js";
 import { CATEGORY_LABELS, CATEGORY_ORDER, DEFAULT_TEMPLATES, personalizeMessage, type ProspectCategory } from "./categories.js";
 import { searchPlaces, phoneToDigits, isPlacesConfigured } from "./places.js";
@@ -60,6 +64,7 @@ qgApiRouter.get("/chats", (_req, res) => {
       lastFromMe: Boolean(c.lastFromMe),
       unread: isChatUnread(c),
       prospect: findProspectByPhone(c.jid.split("@")[0])?.name ?? null,
+      tags: getContactNote(c.jid)?.tags ?? [],
     })),
   });
 });
@@ -82,6 +87,8 @@ qgApiRouter.get("/chats/:jid", (req, res) => {
     isGroup: chat.isGroup,
     prospect: prospect ? { name: prospect.name, bucket: CATEGORY_LABELS[prospect.bucket], contacted: prospect.contacted } : null,
     suggestion: getSuggestedReply(jid) ?? null,
+    phone: contactKey(jid),
+    fiche: getContactNote(jid) ?? { phone: contactKey(jid), note: "", tags: [], updatedAt: 0 },
     messages: getMessages(jid, 120).map((m) => ({ id: m.id, fromMe: m.fromMe, text: m.text, timestamp: m.timestamp, senderName: m.senderName ?? null })),
   });
 });
@@ -138,6 +145,8 @@ qgApiRouter.get("/prospects", (req, res) => {
       bucketLabel: CATEGORY_LABELS[p.bucket],
       contacted: p.contacted,
       addedAt: p.addedAt,
+      note: getContactNote(p.phone)?.note ?? "",
+      tags: getContactNote(p.phone)?.tags ?? [],
     })),
   });
 });
@@ -251,4 +260,33 @@ qgApiRouter.get("/metrics", (req, res) => {
   const days = Math.min(90, Math.max(1, Number(req.query.days) || 14));
   res.set("Cache-Control", "no-store");
   res.json({ ok: true, reponse: responseStats(days), enAttente: pendingChats().slice(0, 20) });
+});
+
+/** Fiche interne d'un contact : note privee et etiquettes. */
+qgApiRouter.get("/contacts/:phone", (req, res) => {
+  const phone = contactKey(String(req.params.phone || ""));
+  res.set("Cache-Control", "no-store");
+  res.json({
+    ok: true,
+    fiche: getContactNote(phone) ?? { phone, note: "", tags: [], updatedAt: 0 },
+    etiquettes: allTags(),
+  });
+});
+
+/**
+ * Enregistre la fiche. Ces notes ne partent jamais au client : elles
+ * servent a se souvenir ("rappeler lundi", "vend des cosmetiques") et a
+ * retrouver les contacts par etiquette.
+ */
+qgApiRouter.post("/contacts/:phone", (req, res) => {
+  const phone = contactKey(String(req.params.phone || ""));
+  if (!phone) {
+    res.status(400).json({ ok: false, error: "Numero illisible" });
+    return;
+  }
+  const note = String(req.body?.note ?? "");
+  const rawTags = req.body?.tags;
+  const tags = Array.isArray(rawTags) ? rawTags.map(String) : String(rawTags ?? "").split(",");
+  const fiche = setContactNote(phone, note, tags);
+  res.json({ ok: true, fiche: fiche ?? { phone, note: "", tags: [], updatedAt: 0 }, etiquettes: allTags() });
 });

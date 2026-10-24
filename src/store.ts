@@ -57,6 +57,18 @@ export interface Prospect {
   contacted: boolean;
 }
 
+/**
+ * Note interne et etiquettes sur un contact, jamais envoyees au client.
+ * Rangees par numero (chiffres seuls) et non par JID : une conversation
+ * WhatsApp et une fiche prospect designent alors le meme contact.
+ */
+export interface ContactNote {
+  phone: string;
+  note: string;
+  tags: string[];
+  updatedAt: number;
+}
+
 /** Abonnement Web Push d'un appareil (telephone avec l'appli installee sur l'ecran d'accueil). */
 export interface StoredPushSubscription {
   endpoint: string;
@@ -78,6 +90,7 @@ interface DiskShape {
   prospects: Prospect[];
   suggestedReplies: Record<string, string>;
   pushSubscriptions: StoredPushSubscription[];
+  contactNotes?: Record<string, ContactNote>;
 }
 
 let chats = new Map<string, ChatMeta>();
@@ -87,6 +100,7 @@ let templates: MessageTemplate[] = [];
 let prospects: Prospect[] = [];
 let suggestedReplies = new Map<string, string>();
 let pushSubscriptions: StoredPushSubscription[] = [];
+let contactNotes = new Map<string, ContactNote>();
 
 function load() {
   try {
@@ -104,6 +118,7 @@ function load() {
     }));
     suggestedReplies = new Map(Object.entries(parsed.suggestedReplies || {}));
     pushSubscriptions = parsed.pushSubscriptions || [];
+    contactNotes = new Map(Object.entries(parsed.contactNotes || {}));
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error("[delivrou-notify] Impossible de charger l'historique sauvegarde:", err);
@@ -125,6 +140,7 @@ function scheduleSave() {
         prospects,
         suggestedReplies: Object.fromEntries(suggestedReplies),
         pushSubscriptions,
+        contactNotes: Object.fromEntries(contactNotes),
       };
       // Ecriture atomique (fichier temporaire puis renommage) : si le
       // service est interrompu en pleine ecriture (redemarrage, crash),
@@ -336,4 +352,41 @@ export function removePushSubscriptionByEndpoint(endpoint: string) {
   const before = pushSubscriptions.length;
   pushSubscriptions = pushSubscriptions.filter((s) => s.endpoint !== endpoint);
   if (pushSubscriptions.length !== before) scheduleSave();
+}
+
+/** Numero seul, quelle que soit la forme recue (JID, +224..., espaces). */
+export function contactKey(jidOrPhone: string): string {
+  return String(jidOrPhone).split("@")[0].replace(/\D/g, "");
+}
+
+export function getContactNote(jidOrPhone: string): ContactNote | undefined {
+  return contactNotes.get(contactKey(jidOrPhone));
+}
+
+/** Enregistre note et etiquettes. Une fiche vide est supprimee. */
+export function setContactNote(jidOrPhone: string, note: string, tags: string[]): ContactNote | null {
+  const phone = contactKey(jidOrPhone);
+  if (!phone) return null;
+  const cleanTags = [...new Set(tags.map((t) => t.trim().toLowerCase()).filter(Boolean))].slice(0, 12);
+  const cleanNote = note.trim().slice(0, 2000);
+  if (!cleanNote && !cleanTags.length) {
+    contactNotes.delete(phone);
+    scheduleSave();
+    return null;
+  }
+  const entry: ContactNote = { phone, note: cleanNote, tags: cleanTags, updatedAt: Date.now() };
+  contactNotes.set(phone, entry);
+  scheduleSave();
+  return entry;
+}
+
+/** Toutes les etiquettes deja utilisees, pour proposer l'existant. */
+export function allTags(): string[] {
+  const set = new Set<string>();
+  for (const c of contactNotes.values()) for (const t of c.tags) set.add(t);
+  return [...set].sort();
+}
+
+export function listContactNotes(): ContactNote[] {
+  return [...contactNotes.values()].sort((a, b) => b.updatedAt - a.updatedAt);
 }
