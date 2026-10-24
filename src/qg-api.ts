@@ -40,7 +40,7 @@ import {
 import { STAGES, STAGE_LABELS, STAGE_HINTS, isStage, defaultStage } from "./pipeline.js";
 import { CATEGORY_LABELS, CATEGORY_ORDER, DEFAULT_TEMPLATES, personalizeMessage, type ProspectCategory } from "./categories.js";
 import { searchPlaces, phoneToDigits, isPlacesConfigured } from "./places.js";
-import { askGemini, isGeminiConfigured } from "./gemini.js";
+import { askGemini, isGeminiConfigured, generateProspectPitch } from "./gemini.js";
 import { responseStats, pendingChats } from "./metrics.js";
 import { addProspects, listChats as listChatsForCount, isChatUnread as unread } from "./store.js";
 
@@ -310,4 +310,23 @@ qgApiRouter.post("/prospects/:id/stage", (req, res) => {
     return;
   }
   res.json({ ok: true, stage: p.stage, compteursEtape: countProspectsByStage() });
+});
+
+/** Brouillon de premier message, ecrit pour CE commerce et pas en serie. */
+qgApiRouter.post("/prospects/:id/pitch", async (req, res) => {
+  if (!isGeminiConfigured()) {
+    res.status(503).json({ ok: false, error: "GEMINI_API_KEY non configuree sur le serveur." });
+    return;
+  }
+  const p = getProspect(String(req.params.id || ""));
+  if (!p) {
+    res.status(404).json({ ok: false, error: "Prospect inconnu" });
+    return;
+  }
+  const r = await generateProspectPitch({ name: p.name, categoryLabel: CATEGORY_LABELS[p.bucket], address: p.address });
+  if (!r.ok) {
+    res.status(502).json({ ok: false, error: r.error || "Brouillon indisponible." });
+    return;
+  }
+  res.json({ ok: true, text: r.text });
 });
