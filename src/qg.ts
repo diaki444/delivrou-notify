@@ -18,6 +18,7 @@ import path from "node:path";
 import express, { type Request, type Response, type NextFunction } from "express";
 import { requireDashboardAuth } from "./auth.js";
 import { getLatestByPlatform, weeklySeries, getLastRun } from "./stats.js";
+import { qgApiRouter } from "./qg-api.js";
 
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
 const QG_DIR = path.join(AUTH_DIR, "qg");
@@ -161,6 +162,10 @@ qgRouter.delete("/file/*", requireNotifyKey, (req, res) => {
 
 // --- A partir d'ici : reserve a Ibrahima et Bachir (mot de passe) ---
 qgRouter.use(requireDashboardAuth);
+
+// Conversations, prospects, journal : les memes donnees que le tableau de
+// bord, en JSON, pour que le QG les affiche dans ses propres onglets.
+qgRouter.use("/api", qgApiRouter);
 
 /** Etat partage, lu par les deux appareils. */
 qgRouter.get("/state", (_req, res) => {
