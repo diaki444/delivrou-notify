@@ -74,6 +74,7 @@ const ICONS = {
   chats: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`,
   log: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>`,
   prospects: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M8 11h6"/></svg>`,
+  qg: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21v-6l6-9 6 9v6"/><path d="M9 21v-4h0"/><path d="m15 12 6-4v13h-6"/></svg>`,
   plus: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>`,
   send: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 11l18-8-8 18-2-8-8-2z"/></svg>`,
   trash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m2 0-1 13a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1L6 7"/></svg>`,
@@ -426,13 +427,16 @@ function desktopSidebar(active: "chats" | "logs" | "prospects", activeJid?: stri
   </aside>`;
 }
 
-function tabbar(active: "chats" | "logs" | "prospects"): string {
-  const tab = (key: "chats" | "logs" | "prospects", href: string, icon: string, label: string) =>
+type TabKey = "chats" | "logs" | "prospects" | "qg";
+
+function tabbar(active: TabKey): string {
+  const tab = (key: TabKey, href: string, icon: string, label: string) =>
     `<a class="tab ${active === key ? "is-active" : ""}" href="${href}">${active === key ? '<span class="tab-dot"></span>' : ""}${icon}${label}</a>`;
   return `<div class="tabbar">
     ${tab("chats", "/dashboard", ICONS.chats, "Conversations")}
     ${tab("prospects", "/dashboard/prospection", ICONS.prospects, "Prospects")}
     ${tab("logs", "/dashboard/logs", ICONS.log, "Journal")}
+    ${tab("qg", "/qg/", ICONS.qg, "QG")}
   </div>`;
 }
 

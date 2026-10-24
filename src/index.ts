@@ -53,8 +53,11 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
 
 // Redirige la racine vers le tableau de bord, pour eviter un "Cannot GET /"
 // confus quand on visite juste le domaine.
-app.get("/", (_req, res) => {
-  res.redirect("/dashboard");
+app.get("/", (req, res) => {
+  // Deux portes d'entree pour le meme outil : qg.delivrou.com ouvre le QG
+  // marketing, notify.delivrou.com garde les conversations WhatsApp.
+  const host = String(req.headers.host || "").toLowerCase();
+  res.redirect(host.startsWith("qg.") ? "/qg/" : "/dashboard");
 });
 
 // Pas d'authentification : juste pour un check de vie basique (load balancer, uptime monitor).
