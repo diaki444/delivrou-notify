@@ -34,7 +34,10 @@ import {
   setContactNote,
   allTags,
   contactKey,
+  setProspectStage,
+  countProspectsByStage,
 } from "./store.js";
+import { STAGES, STAGE_LABELS, STAGE_HINTS, isStage, defaultStage } from "./pipeline.js";
 import { CATEGORY_LABELS, CATEGORY_ORDER, DEFAULT_TEMPLATES, personalizeMessage, type ProspectCategory } from "./categories.js";
 import { searchPlaces, phoneToDigits, isPlacesConfigured } from "./places.js";
 import { askGemini, isGeminiConfigured } from "./gemini.js";
@@ -134,7 +137,9 @@ qgApiRouter.get("/prospects", (req, res) => {
   res.json({
     ok: true,
     familles: CATEGORY_ORDER.map((c) => ({ id: c, label: CATEGORY_LABELS[c] })),
+    etapes: STAGES.map((st) => ({ id: st, label: STAGE_LABELS[st], aide: STAGE_HINTS[st] })),
     compteurs: countProspectsByBucket(),
+    compteursEtape: countProspectsByStage(),
     modele: cat ? DEFAULT_TEMPLATES[cat] : "",
     prospects: listProspects(300, cat).map((p) => ({
       id: p.id,
@@ -147,6 +152,7 @@ qgApiRouter.get("/prospects", (req, res) => {
       addedAt: p.addedAt,
       note: getContactNote(p.phone)?.note ?? "",
       tags: getContactNote(p.phone)?.tags ?? [],
+      stage: isStage(p.stage) ? p.stage : defaultStage(p.contacted),
     })),
   });
 });
@@ -289,4 +295,19 @@ qgApiRouter.post("/contacts/:phone", (req, res) => {
   const tags = Array.isArray(rawTags) ? rawTags.map(String) : String(rawTags ?? "").split(",");
   const fiche = setContactNote(phone, note, tags);
   res.json({ ok: true, fiche: fiche ?? { phone, note: "", tags: [], updatedAt: 0 }, etiquettes: allTags() });
+});
+
+/** Deplace un prospect d'une etape a l'autre du parcours. */
+qgApiRouter.post("/prospects/:id/stage", (req, res) => {
+  const stage = String(req.body?.stage || "");
+  if (!isStage(stage)) {
+    res.status(400).json({ ok: false, error: "Etape inconnue" });
+    return;
+  }
+  const p = setProspectStage(String(req.params.id || ""), stage);
+  if (!p) {
+    res.status(404).json({ ok: false, error: "Prospect inconnu" });
+    return;
+  }
+  res.json({ ok: true, stage: p.stage, compteursEtape: countProspectsByStage() });
 });

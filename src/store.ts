@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { classifyCategory, type ProspectCategory } from "./categories.js";
+import { defaultStage, isStage, type Stage } from "./pipeline.js";
 
 /**
  * Stockage leger des conversations et du journal d'envoi, persiste dans un
@@ -55,6 +56,9 @@ export interface Prospect {
   query: string; // recherche d'origine
   addedAt: number;
   contacted: boolean;
+  /** Etape du parcours. Absente sur les fiches d'avant le pipeline. */
+  stage?: Stage;
+  stageAt?: number;
 }
 
 /**
@@ -115,6 +119,7 @@ function load() {
     prospects = (parsed.prospects || []).map((p) => ({
       ...p,
       bucket: p.bucket || classifyCategory(p.category, p.query),
+      stage: isStage(p.stage) ? p.stage : defaultStage(Boolean(p.contacted)),
     }));
     suggestedReplies = new Map(Object.entries(parsed.suggestedReplies || {}));
     pushSubscriptions = parsed.pushSubscriptions || [];
@@ -310,6 +315,11 @@ export function addProspects(
 }
 
 export function markProspectContacted(id: string) {
+  const prospect = prospects.find((x) => x.id === id);
+  if (prospect && (!prospect.stage || prospect.stage === "a_contacter")) {
+    prospect.stage = "contacte";
+    prospect.stageAt = Date.now();
+  }
   const p = prospects.find((x) => x.id === id);
   if (p) p.contacted = true;
   scheduleSave();
@@ -389,4 +399,26 @@ export function allTags(): string[] {
 
 export function listContactNotes(): ContactNote[] {
   return [...contactNotes.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+/** Deplace un prospect dans le parcours. */
+export function setProspectStage(id: string, stage: Stage): Prospect | undefined {
+  const p = prospects.find((x) => x.id === id);
+  if (!p) return undefined;
+  p.stage = stage;
+  p.stageAt = Date.now();
+  // "Contacte" et au-dela impliquent qu'on lui a ecrit au moins une fois.
+  if (stage !== "a_contacter") p.contacted = true;
+  scheduleSave();
+  return p;
+}
+
+/** Combien de prospects a chaque etape. */
+export function countProspectsByStage(): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const p of prospects) {
+    const st = isStage(p.stage) ? p.stage : defaultStage(p.contacted);
+    out[st] = (out[st] || 0) + 1;
+  }
+  return out;
 }
