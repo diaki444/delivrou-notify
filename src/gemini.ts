@@ -275,5 +275,5 @@ export async function askGemini(instruction: string): Promise<{ ok: boolean; tex
  * message court. Le contexte entreprise reste inclus.
  */
 export async function askGeminiEmail(instruction: string): Promise<{ ok: boolean; text?: string; error?: string }> {
-  return callGemini(`${COMPANY_CONTEXT}\n\n${instruction}`);
+  return callGemini(`${COMPANY_CONTEXT}\n\n${instruction}`, "email");
 }
