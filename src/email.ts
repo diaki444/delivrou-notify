@@ -24,12 +24,14 @@ const FILE = path.join(AUTH_DIR, "emails.json");
 const POLL_MS = 2 * 60_000;
 const MAX_KEPT = 400;
 const FETCH_LAST = 40;
+const FILE_VERSION = 2;
 
-export const CLASSES = ["client", "collaborateur", "partenaire", "prospect", "facture", "pub", "autre"] as const;
+export const CLASSES = ["client", "collaborateur", "candidat", "partenaire", "prospect", "facture", "pub", "autre"] as const;
 export type MailClass = (typeof CLASSES)[number];
 export const CLASS_LABELS: Record<MailClass, string> = {
   client: "Client",
   collaborateur: "Collaborateur",
+  candidat: "Candidature",
   partenaire: "Partenaire / commerce",
   prospect: "Demande de contact",
   facture: "Facture / paiement",
@@ -78,7 +80,8 @@ let syncing = false;
 function load() {
   try {
     if (!fs.existsSync(FILE)) return;
-    const parsed = JSON.parse(fs.readFileSync(FILE, "utf8")) as { threads?: MailThread[]; lastSync?: number };
+    const parsed = JSON.parse(fs.readFileSync(FILE, "utf8")) as { threads?: MailThread[]; lastSync?: number; v?: number };
+    if (parsed.v !== FILE_VERSION) return; // format de lecture change : on relit la boite
     threads = new Map((parsed.threads ?? []).map((t) => [t.key, t]));
     lastSync = parsed.lastSync ?? 0;
   } catch (err) {
@@ -92,7 +95,7 @@ function save() {
     const kept = [...threads.values()].sort((a, b) => b.lastDate - a.lastDate).slice(0, MAX_KEPT);
     threads = new Map(kept.map((t) => [t.key, t]));
     const tmp = `${FILE}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify({ threads: kept, lastSync }), "utf8");
+    fs.writeFileSync(tmp, JSON.stringify({ threads: kept, lastSync, v: FILE_VERSION }), "utf8");
     fs.renameSync(tmp, FILE);
   } catch (err) {
     console.error("[delivrou-notify] Ecriture de emails.json impossible:", err instanceof Error ? err.message : err);
@@ -213,13 +216,30 @@ function addMessage(m: MailMessage, unread: boolean) {
   const last = t.messages[t.messages.length - 1];
   t.lastDate = last.date;
   t.lastFromMe = last.fromMe;
-  t.lastText = last.text.replace(/\s+/g, " ").slice(0, 160);
+  t.lastText = last.text.replace(/\s+/g, " ").slice(0, 400);
   if (!m.fromMe && unread) {
     t.unread = true;
     t.archived = false;
     t.draft = undefined; // nouveau message : l'ancien brouillon ne convient plus
     t.klass = undefined; // a reclasser
   }
+}
+
+/** Transforme un email HTML en texte lisible (sans style, scripts ni balises). */
+function htmlToText(html: string): string {
+  return html
+    .replace(/<(style|script|head)[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<br\s*\/?>|<\/(p|div|tr|li|h\d)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n\s*\n+/g, "\n\n")
+    .trim();
 }
 
 /** Retire citations et historique pour garder l'essentiel du message. */
@@ -250,7 +270,9 @@ async function pull(client: ImapFlow, box: string, fromMe: boolean, since: Date)
       const from = p.from?.value?.[0];
       const toField = p.to ? (Array.isArray(p.to) ? p.to[0] : p.to) : undefined;
       const to = toField?.value?.[0];
-      const html = typeof p.html === "string" ? p.html.replace(/<[^>]+>/g, " ") : "";
+      const body = (p.text || "").trim() || (typeof p.html === "string" ? htmlToText(p.html) : "");
+      const pj = (p.attachments || []).filter((a) => a.filename).map((a) => a.filename);
+      const withPj = pj.length ? `${body}\n\n[Pièce(s) jointe(s) : ${pj.join(", ")}]`.trim() : body;
       addMessage(
         {
           id: p.messageId || `${box}-${uid}`,
@@ -258,7 +280,7 @@ async function pull(client: ImapFlow, box: string, fromMe: boolean, since: Date)
           fromName: from?.name || "",
           to: (to?.address || "").toLowerCase(),
           subject: p.subject || "",
-          text: cleanBody(p.text || html),
+          text: cleanBody(withPj) || "(message sans texte)",
           date: (p.date || new Date()).getTime(),
           references: Array.isArray(p.references) ? p.references : p.references ? [p.references] : undefined,
           fromMe,
@@ -323,9 +345,10 @@ export async function classifyPending() {
       const last = t.messages[t.messages.length - 1];
       const r = await askGeminiEmail(
         `Classe cet email recu par Delivrou. Reponds UNIQUEMENT par un objet JSON, sans autre texte :\n` +
-          `{"classe":"client|collaborateur|partenaire|prospect|facture|pub|autre","urgent":true,"resume":"une phrase"}\n` +
+          `{"classe":"client|collaborateur|candidat|partenaire|prospect|facture|pub|autre","urgent":true,"resume":"une phrase"}\n` +
           `- client : utilise ou veut utiliser Delivrou pour un colis, ou reclame\n` +
           `- collaborateur : livreur, equipe, freelance, prestataire qui travaille avec Delivrou\n` +
+          `- candidat : cherche un emploi, un stage ou une mission de livreur / dans l'equipe\n` +
           `- partenaire : commerce ou entreprise qui veut collaborer\n` +
           `- prospect : premiere prise de contact, question generale\n` +
           `- facture : facture, paiement, abonnement, banque\n` +
@@ -340,8 +363,21 @@ export async function classifyPending() {
       t.resume = typeof j?.resume === "string" ? j.resume.slice(0, 200) : undefined;
     }
     save();
+    await draftPending();
   } finally {
     classifying = false;
+  }
+}
+
+/** Prepare un brouillon pour chaque fil a repondre, pour que la reponse soit deja la a l'ouverture. */
+async function draftPending() {
+  const todo = [...threads.values()]
+    .filter((t) => !t.archived && !t.lastFromMe && !t.draft && t.klass && t.klass !== "pub")
+    .sort((a, b) => b.lastDate - a.lastDate)
+    .slice(0, 8);
+  for (const t of todo) {
+    const r = await draftReply(t.key);
+    if (!r.ok) break; // quota ou erreur : on reessaiera au prochain passage
   }
 }
 
@@ -358,9 +394,17 @@ export async function draftReply(key: string, consigne?: string): Promise<{ ok: 
     `Tu rediges la reponse email de Delivrou. Interlocuteur classe comme : ${t.klass ? CLASS_LABELS[t.klass] : "inconnu"}.\n` +
       `Echange (le plus recent en dernier) :\n${history}\n\n` +
       (consigne ? `Consigne de l'humain pour cette reponse : ${consigne.slice(0, 300)}\n\n` : "") +
-      `Ecris UNIQUEMENT le corps de l'email, en francais simple, poli et chaleureux : une salutation, 2 a 5 phrases, ` +
-      `puis "Cordialement," et "L'equipe Delivrou" sur deux lignes. Pas d'objet, pas de markdown. ` +
-      `Ne promets ni prix ni delai precis. Si une information manque, pose une question precise ou dis qu'on revient vers la personne.`,
+      `OBJECTIF : cette personne ne doit jamais nous quitter. Chaque echange doit lui donner envie de rester et de continuer avec Delivrou. ` +
+      `Pour ca : (1) montre que tu as vraiment lu son message en reprenant ses mots ou son probleme precis ; ` +
+      `(2) si elle est mecontente ou inquiete, commence par le reconnaitre et t'excuser sincerement sans te justifier ; ` +
+      `(3) reponds concretement a CHAQUE question posee ; (4) rassure avec ce que Delivrou fait vraiment (livreurs verifies, suivi en direct, code de livraison, support 7j/7) ; ` +
+      `(5) termine TOUJOURS par une prochaine etape claire et facile (un lien www.delivrou.com, une question precise, un rappel propose) pour que la conversation continue. ` +
+      `Ne laisse jamais une porte fermee. Si c'est une candidature : remercie, dis que le dossier est etudie et demande ce qui manque (commune, disponibilites, numero WhatsApp). ` +
+      `Si c'est un collaborateur : valorise son travail, traite sa demande, montre qu'on compte sur lui.\n\n` +
+      `FORME : ecris UNIQUEMENT le corps de l'email, en francais simple, chaleureux et humain, sans jargon. ` +
+      `Une salutation avec son prenom si on le connait, 3 a 6 phrases en courts paragraphes, puis "Cordialement," et "L'equipe Delivrou" sur deux lignes. ` +
+      `Pas d'objet, pas de markdown, pas de liste a puces. Ne promets ni prix ni delai precis (renvoie vers l'appli) ; ` +
+      `reclamation grave ou sujet important : propose qu'Ibrahima rappelle. Ne critique jamais un concurrent.`,
   );
   if (!r.ok || !r.text) return { ok: false, error: r.error || "Brouillon indisponible." };
   t.draft = r.text.trim();

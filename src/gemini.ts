@@ -117,7 +117,7 @@ function withKnowledge(prompt: string): string {
   return k ? `${prompt}\n\n${k}` : prompt;
 }
 
-async function callGemini(prompt: string): Promise<{ ok: boolean; text?: string; error?: string }> {
+async function callGemini(prompt: string, mode: "whatsapp" | "email" = "whatsapp"): Promise<{ ok: boolean; text?: string; error?: string }> {
   if (!GEMINI_API_KEY) {
     return { ok: false, error: "GEMINI_API_KEY non configurée sur le serveur." };
   }
@@ -177,7 +177,9 @@ async function callGemini(prompt: string): Promise<{ ok: boolean; text?: string;
         lastError = "Réponse IA tronquée (limite de longueur atteinte), ignorée par sécurité.";
         continue;
       }
-      const text = sanitizeAiText(raw);
+      // Un email n'est pas un message WhatsApp : pas de limite de 600 signes ni
+      // d'obligation de finir par une ponctuation (une signature n'en a pas).
+      const text = mode === "email" ? raw.replace(/^```\w*\n?|```$/g, "").trim() : sanitizeAiText(raw);
       if (!text) {
         lastError = "Réponse IA mal formée, ignorée par sécurité.";
         continue;
