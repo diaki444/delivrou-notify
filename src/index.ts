@@ -9,6 +9,7 @@ import { sendWithGuards, queueLength } from "./send-queue.js";
 import { dashboardRouter } from "./dashboard.js";
 import { qgRouter } from "./qg.js";
 import { isDashboardConfigured } from "./auth.js";
+import { startEmailPolling } from "./email.js";
 import { startStatsCollector, collectNow, getLatestByPlatform, weeklySeries, getLastRun } from "./stats.js";
 import { probe as zernioProbe } from "./zernio.js";
 
@@ -221,6 +222,9 @@ app.listen(PORT, () => {
 // Collecte horaire des statistiques Facebook / TikTok. Independante de
 // WhatsApp : elle tourne meme si la connexion WhatsApp est suspendue.
 startStatsCollector();
+
+// Boite email du QG (inactive tant que GMAIL_USER / GMAIL_APP_PASSWORD sont absents).
+startEmailPolling();
 
 if (process.env.WHATSAPP_DISABLED === "true") {
   // eslint-disable-next-line no-console

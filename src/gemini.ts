@@ -266,3 +266,12 @@ export async function suggestReply(
 export async function askGemini(instruction: string): Promise<{ ok: boolean; text?: string; error?: string }> {
   return callGemini(`${COMPANY_CONTEXT}\n\n${instruction}\n\n${FORMAT_RULES}`);
 }
+
+/**
+ * Comme askGemini, mais sans les regles de format WhatsApp : pour les emails,
+ * dont la forme (salutation, signature, paragraphes) n'est pas celle d'un
+ * message court. Le contexte entreprise reste inclus.
+ */
+export async function askGeminiEmail(instruction: string): Promise<{ ok: boolean; text?: string; error?: string }> {
+  return callGemini(`${COMPANY_CONTEXT}\n\n${instruction}`);
+}

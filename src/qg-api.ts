@@ -41,6 +41,21 @@ import { STAGES, STAGE_LABELS, STAGE_HINTS, isStage, defaultStage } from "./pipe
 import { CATEGORY_LABELS, CATEGORY_ORDER, DEFAULT_TEMPLATES, personalizeMessage, type ProspectCategory } from "./categories.js";
 import { searchPlaces, phoneToDigits, isPlacesConfigured } from "./places.js";
 import { askGemini, isGeminiConfigured, generateProspectPitch } from "./gemini.js";
+import {
+  CLASSES,
+  CLASS_LABELS,
+  emailStatus,
+  listThreads,
+  getThread,
+  markRead,
+  setClass,
+  archiveThread,
+  unreadCount,
+  waitingThreads,
+  syncEmails,
+  draftReply,
+  sendReply as sendMailReply,
+} from "./email.js";
 import { responseStats, pendingChats } from "./metrics.js";
 import { addProspects, listChats as listChatsForCount, isChatUnread as unread } from "./store.js";
 
@@ -195,6 +210,7 @@ qgApiRouter.get("/counts", (_req, res) => {
     messages: chats.filter(unread).length,
     journal: log.filter((e) => e.timestamp > dayAgo && e.status !== "sent").length,
     prospects: listProspects(1000).filter((p) => !p.contacted).length,
+    emails: unreadCount(),
     connected: whatsapp.isConnected(),
   });
 });
@@ -329,4 +345,64 @@ qgApiRouter.post("/prospects/:id/pitch", async (req, res) => {
     return;
   }
   res.json({ ok: true, text: r.text });
+});
+
+// --- Emails : clients et collaborateurs, classes et repondus depuis le QG ---
+
+qgApiRouter.get("/emails", (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.json({
+    ok: true,
+    etat: emailStatus(),
+    classes: CLASSES.map((c) => ({ id: c, label: CLASS_LABELS[c] })),
+    fils: listThreads(),
+    enAttente: waitingThreads(),
+  });
+});
+
+/** Releve la boite tout de suite, sans attendre le passage automatique. */
+qgApiRouter.post("/emails/sync", async (_req, res) => {
+  const r = await syncEmails();
+  res.status(r.ok ? 200 : 502).json(r);
+});
+
+qgApiRouter.get("/emails/thread", (req, res) => {
+  const t = getThread(String(req.query.key || ""));
+  if (!t) {
+    res.status(404).json({ ok: false, error: "Fil inconnu" });
+    return;
+  }
+  markRead(t.key);
+  res.set("Cache-Control", "no-store");
+  res.json({
+    ok: true,
+    key: t.key,
+    subject: t.subject,
+    contact: t.contact,
+    name: t.contactName || t.contact,
+    klass: t.klass ?? null,
+    resume: t.resume ?? null,
+    draft: t.draft ?? null,
+    messages: t.messages.map((m) => ({ id: m.id, fromMe: m.fromMe, text: m.text, date: m.date })),
+  });
+});
+
+qgApiRouter.post("/emails/draft", async (req, res) => {
+  const r = await draftReply(String(req.body?.key || ""), String(req.body?.consigne || ""));
+  res.status(r.ok ? 200 : 502).json(r);
+});
+
+qgApiRouter.post("/emails/send", async (req, res) => {
+  const r = await sendMailReply(String(req.body?.key || ""), String(req.body?.text || ""));
+  res.status(r.ok ? 200 : 502).json(r);
+});
+
+qgApiRouter.post("/emails/class", (req, res) => {
+  const klass = String(req.body?.klass || "");
+  const ok = (CLASSES as readonly string[]).includes(klass) && setClass(String(req.body?.key || ""), klass as (typeof CLASSES)[number]);
+  res.status(ok ? 200 : 400).json({ ok });
+});
+
+qgApiRouter.post("/emails/archive", (req, res) => {
+  res.json({ ok: archiveThread(String(req.body?.key || "")) });
 });
