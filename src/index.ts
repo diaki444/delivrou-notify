@@ -171,9 +171,11 @@ app.get("/qr", async (req, res) => {
 
 // --- Webhook de l'API officielle Meta (public : Meta l'appelle depuis ses serveurs) ---
 // Poignee de main de verification, puis messages entrants. Actif seulement
-// avec WHATSAPP_PROVIDER=meta ; sinon on repond 404 comme si la route n'existait pas.
+// des que WHATSAPP_VERIFY_TOKEN est defini (sinon 404). Les messages ne sont
+// traites que si WHATSAPP_PROVIDER=meta : on peut donc brancher et verifier le
+// webhook chez Meta pendant que le service reste en mode QR code.
 app.get("/webhook/whatsapp", (req, res) => {
-  if (process.env.WHATSAPP_PROVIDER !== "meta") return res.sendStatus(404);
+  if (!process.env.WHATSAPP_VERIFY_TOKEN) return res.sendStatus(404);
   if (metaClient.verifyHandshake(req.query["hub.mode"], req.query["hub.verify_token"])) {
     return res.status(200).send(String(req.query["hub.challenge"] ?? ""));
   }
@@ -181,11 +183,12 @@ app.get("/webhook/whatsapp", (req, res) => {
 });
 
 app.post("/webhook/whatsapp", (req, res) => {
-  if (process.env.WHATSAPP_PROVIDER !== "meta") return res.sendStatus(404);
+  if (!process.env.WHATSAPP_VERIFY_TOKEN) return res.sendStatus(404);
   const raw = (req as unknown as { rawBody?: Buffer }).rawBody;
   if (!metaClient.verifySignature(raw, req.header("x-hub-signature-256"))) return res.sendStatus(401);
   // Accuser reception tout de suite : Meta reessaie si la reponse tarde.
   res.sendStatus(200);
+  if (process.env.WHATSAPP_PROVIDER !== "meta") return; // mode QR code : on ignore les messages Meta
   try {
     metaClient.handleWebhook(req.body as IncomingWebhook);
   } catch (err) {
