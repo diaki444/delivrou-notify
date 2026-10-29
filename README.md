@@ -1,5 +1,7 @@
 # delivrou-notify
 
+> 📌 **API officielle Meta : voir [META_WHATSAPP.md](./META_WHATSAPP.md)** (interrupteur `WHATSAPP_PROVIDER`).
+
 > ℹ️ **Retour temporaire a Baileys (13 octobre 2026)** : la migration vers l'API officielle WhatsApp Business (Meta Cloud API) est en pause — le numero reste bloque au statut "En attente" cote Meta malgre plusieurs tentatives de verification (plus de 72h sans deblocage). En attendant la resolution par le support Meta, le service revient temporairement sur la connexion Baileys/QR code ci-dessous pour ne pas interrompre les notifications. La migration Meta reste a reprendre des que le numero sera debloque (code disponible dans l'historique git, commit `683c97d`).
 
 Service de notification WhatsApp pour **delivrou.com**, sans Twilio, NimbaSMS ni Wazzap AI.

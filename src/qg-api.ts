@@ -65,7 +65,7 @@ qgApiRouter.use(express.json({ limit: "256kb" }));
 /** Etat du service : connexion WhatsApp et quotas d'envoi. */
 qgApiRouter.get("/status", (_req, res) => {
   res.set("Cache-Control", "no-store");
-  res.json({ ok: true, connected: whatsapp.isConnected(), queueLength: queueLength(), safety: getSafetyStatus() });
+  res.json({ ok: true, connected: whatsapp.isConnected(), provider: whatsapp.getInfo(), queueLength: queueLength(), safety: getSafetyStatus() });
 });
 
 /** Liste des conversations, les plus recentes d'abord. */

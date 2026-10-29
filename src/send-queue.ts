@@ -36,7 +36,9 @@ export type SendResult = { ok: boolean; error?: string; blocked?: boolean };
  * tableau de bord) : verifie les garde-fous anti-blocage, met en file,
  * et journalise le resultat dans l'historique visible du tableau de bord.
  */
-export function sendWithGuards(phone: string, text: string, source: SendSource): Promise<SendResult> {
+export type SendTemplate = { name: string; params?: string[]; lang?: string };
+
+export function sendWithGuards(phone: string, text: string, source: SendSource, template?: SendTemplate): Promise<SendResult> {
   if (process.env.WHATSAPP_DISABLED === "true") {
     const reason = "WhatsApp desactive (WHATSAPP_DISABLED=true) : envoi suspendu volontairement.";
     addSendLogEntry({ phone, text, source, status: "blocked", error: reason });
@@ -55,7 +57,7 @@ export function sendWithGuards(phone: string, text: string, source: SendSource):
         const timeout = new Promise<never>((_, rej) =>
           setTimeout(() => rej(new Error("Timeout d'envoi WhatsApp")), SEND_TIMEOUT_MS),
         );
-        await Promise.race([whatsapp.sendText(phone, text), timeout]);
+        await Promise.race([template ? whatsapp.sendTemplate(phone, template.name, template.params ?? [], template.lang ?? "fr") : whatsapp.sendText(phone, text), timeout]);
         recordSentSuccess(phone);
         addSendLogEntry({ phone, text, source, status: "sent" });
         resolve({ ok: true });

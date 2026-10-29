@@ -14,10 +14,12 @@ import { recordMessage, upsertChat, getMessages, getChat, setSuggestedReply, fin
 import { isGeminiConfigured, suggestReply } from "./gemini.js";
 import { CATEGORY_LABELS } from "./categories.js";
 import { notifyAllSubscriptions } from "./push.js";
+import { metaClient } from "./whatsapp-meta.js";
 
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
 
 class WhatsAppClient {
+  readonly provider = "baileys" as const;
   private sock: WASocket | null = null;
   private connected = false;
   private connecting = false;
@@ -26,6 +28,14 @@ class WhatsAppClient {
 
   isConnected(): boolean {
     return this.connected;
+  }
+
+  getInfo() {
+    return { provider: "baileys", connected: this.connected, number: null as string | null, error: null as string | null };
+  }
+
+  async sendTemplate(_target: string, _name: string, _params?: string[], _lang?: string): Promise<void> {
+    throw new Error("Les modeles de message demandent l'API officielle Meta (WHATSAPP_PROVIDER=meta).");
   }
 
   /** Dernier QR code recu, au cas ou vous devez le reafficher sans redemarrer le service. */
@@ -196,4 +206,22 @@ class WhatsAppClient {
   }
 }
 
-export const whatsapp = new WhatsAppClient();
+const baileys = new WhatsAppClient();
+
+/** Ce que le reste du service attend d'un client WhatsApp, quel que soit le fournisseur. */
+export interface WhatsAppProvider {
+  readonly provider: "baileys" | "meta";
+  isConnected(): boolean;
+  getLastQr(): string | null;
+  getInfo(): { provider: string; connected: boolean; number: string | null; error: string | null };
+  connect(): Promise<void>;
+  numberHasWhatsApp(phoneDigits: string): Promise<boolean>;
+  sendText(target: string, text: string): Promise<void>;
+  sendTemplate(target: string, name: string, params?: string[], lang?: string): Promise<void>;
+}
+
+/**
+ * WHATSAPP_PROVIDER=meta : API officielle (Cloud API).
+ * Sinon (par defaut) : connexion par QR code (Baileys), comme avant.
+ */
+export const whatsapp: WhatsAppProvider = process.env.WHATSAPP_PROVIDER === "meta" ? metaClient : baileys;

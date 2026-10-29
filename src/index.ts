@@ -10,6 +10,7 @@ import { dashboardRouter } from "./dashboard.js";
 import { qgRouter } from "./qg.js";
 import { isDashboardConfigured } from "./auth.js";
 import { startEmailPolling } from "./email.js";
+import { metaClient, type IncomingWebhook } from "./whatsapp-meta.js";
 import { startStatsCollector, collectNow, getLatestByPlatform, weeklySeries, getLastRun } from "./stats.js";
 import { probe as zernioProbe } from "./zernio.js";
 
@@ -32,7 +33,14 @@ if (!isDashboardConfigured()) {
 }
 
 const app = express();
-app.use(express.json());
+app.use(
+  express.json({
+    // Garde le corps brut : Meta signe ses webhooks, la signature se verifie sur les octets d'origine.
+    verify: (req, _res, buf) => {
+      (req as unknown as { rawBody?: Buffer }).rawBody = buf;
+    },
+  }),
+);
 app.use(express.urlencoded({ extended: false }));
 // Manifest, icones et service worker pour pouvoir installer le tableau de
 // bord sur l'ecran d'accueil du telephone (PWA) et recevoir des
@@ -161,6 +169,30 @@ app.get("/qr", async (req, res) => {
   );
 });
 
+// --- Webhook de l'API officielle Meta (public : Meta l'appelle depuis ses serveurs) ---
+// Poignee de main de verification, puis messages entrants. Actif seulement
+// avec WHATSAPP_PROVIDER=meta ; sinon on repond 404 comme si la route n'existait pas.
+app.get("/webhook/whatsapp", (req, res) => {
+  if (process.env.WHATSAPP_PROVIDER !== "meta") return res.sendStatus(404);
+  if (metaClient.verifyHandshake(req.query["hub.mode"], req.query["hub.verify_token"])) {
+    return res.status(200).send(String(req.query["hub.challenge"] ?? ""));
+  }
+  return res.sendStatus(403);
+});
+
+app.post("/webhook/whatsapp", (req, res) => {
+  if (process.env.WHATSAPP_PROVIDER !== "meta") return res.sendStatus(404);
+  const raw = (req as unknown as { rawBody?: Buffer }).rawBody;
+  if (!metaClient.verifySignature(raw, req.header("x-hub-signature-256"))) return res.sendStatus(401);
+  // Accuser reception tout de suite : Meta reessaie si la reponse tarde.
+  res.sendStatus(200);
+  try {
+    metaClient.handleWebhook(req.body as IncomingWebhook);
+  } catch (err) {
+    console.error("[delivrou-notify] Erreur traitement webhook WhatsApp:", err);
+  }
+});
+
 app.post("/check", requireAuth, async (req, res) => {
   const phone = String(req.body?.phone || "").replace(/\D/g, "");
   if (!phone) {
@@ -182,9 +214,13 @@ app.post("/check", requireAuth, async (req, res) => {
 app.post("/send", requireAuth, async (req, res) => {
   const phone = String(req.body?.phone || "").replace(/\D/g, "");
   const text = String(req.body?.text || "").trim();
+  // Message modele (API officielle) : { phone, template: "nom", params: ["a","b"], lang: "fr" }
+  const tpl = req.body?.template ? String(req.body.template) : "";
+  const params = Array.isArray(req.body?.params) ? (req.body.params as unknown[]).map(String) : [];
+  const lang = req.body?.lang ? String(req.body.lang) : "fr";
 
-  if (!phone || !text) {
-    res.status(400).json({ ok: false, error: "phone et text sont requis" });
+  if (!phone || (!text && !tpl)) {
+    res.status(400).json({ ok: false, error: "phone et text (ou template) sont requis" });
     return;
   }
   if (!whatsapp.isConnected()) {
@@ -192,7 +228,7 @@ app.post("/send", requireAuth, async (req, res) => {
     return;
   }
 
-  const result = await sendWithGuards(phone, text, "auto");
+  const result = await sendWithGuards(phone, text || `[modele ${tpl}] ${params.join(" | ")}`, "auto", tpl ? { name: tpl, params, lang } : undefined);
   if (!result.ok) {
     res.status(result.blocked ? 429 : 500).json({ ok: false, error: result.error });
     return;
