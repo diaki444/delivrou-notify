@@ -56,6 +56,7 @@ import {
   draftReply,
   sendReply as sendMailReply,
 } from "./email.js";
+import { otpSecuritySummary } from "./otp.js";
 import { responseStats, pendingChats } from "./metrics.js";
 import { addProspects, listChats as listChatsForCount, isChatUnread as unread } from "./store.js";
 
@@ -345,6 +346,12 @@ qgApiRouter.post("/prospects/:id/pitch", async (req, res) => {
     return;
   }
   res.json({ ok: true, text: r.text });
+});
+
+/** Securite des codes WhatsApp : envois, refus, abus. Jamais de code ni de numero complet. */
+qgApiRouter.get("/security", (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.json({ ok: true, ...otpSecuritySummary() });
 });
 
 // --- Emails : clients et collaborateurs, classes et repondus depuis le QG ---

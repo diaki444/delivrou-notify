@@ -191,6 +191,27 @@ class MetaClient {
     recordMessage({ id: id ?? `meta-${Date.now()}`, chatJid: jidOf(to), fromMe: true, text: shownText ?? `[modèle ${name}] ${params.join(" · ")}`.trim(), timestamp: Date.now() });
   }
 
+  /**
+   * Code de verification : modele de categorie « Authentification » (code + bouton « Copier le code »).
+   * Ne passe volontairement PAS par recordMessage : le code ne doit apparaitre nulle part.
+   */
+  async sendOtpTemplate(target: string, code: string, name = "code_verification", lang = "fr"): Promise<void> {
+    const to = this.digits(target);
+    if (!to) throw new Error("Numero illisible");
+    await this.post({
+      to,
+      type: "template",
+      template: {
+        name,
+        language: { code: lang },
+        components: [
+          { type: "body", parameters: [{ type: "text", text: code }] },
+          { type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: code }] },
+        ],
+      },
+    });
+  }
+
   // ---------- webhook ----------
 
   verifyHandshake(mode: unknown, token: unknown): boolean {

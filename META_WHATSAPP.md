@@ -74,3 +74,10 @@ Modèle à créer dans Gestionnaire WhatsApp (catégorie Utilitaire, français) 
 > Bonjour, voici une mise à jour de ta commande Delivrou : {{1}} Merci de ta confiance.
 
 Les retours à la ligne du message d'origine sont remplacés par « · » (Meta n'en accepte pas dans une variable). Seuls les envois automatiques (`source: auto`) utilisent ce secours : une réponse écrite à la main dans le QG affiche l'erreur claire.
+
+## Codes de verification (OTP) par WhatsApp
+Point d'entree : `POST /otp/send` (en-tete `x-notify-key`), corps `{ "phone": "224628901285", "code": "123456", "ip": "<adresse du client>" }`. Reponse : `{ "ok": true }` ou `{ "ok": false, "error": "..." }`. Le code n'est jamais enregistre, journalise ni renvoye.
+
+Defenses du serveur (modifiables par variables, voir `src/otp.ts`) : numeros mobiles guineens seulement (`OTP_ALLOWED_PREFIXES`), 30 s entre deux envois, 3 envois / 10 min et 10 / jour par numero, 10 / heure par adresse, 120 / heure et 600 / jour au total, coupe-circuit apres 5 echecs, interrupteur `OTP_DISABLED=true`. Resume des refus (numeros masques) : `GET /qg/api/security`.
+
+Modele Meta requis : categorie **Authentification**, langue francais, nom `WHATSAPP_OTP_TEMPLATE` (defaut `code_verification`), avec le bouton « Copier le code ». L'API officielle (`WHATSAPP_PROVIDER=meta`) est obligatoire.

@@ -10,6 +10,7 @@ import { dashboardRouter } from "./dashboard.js";
 import { qgRouter } from "./qg.js";
 import { isDashboardConfigured } from "./auth.js";
 import { startEmailPolling } from "./email.js";
+import { sendOtp } from "./otp.js";
 import { metaClient, type IncomingWebhook } from "./whatsapp-meta.js";
 import { startStatsCollector, collectNow, getLatestByPlatform, weeklySeries, getLastRun } from "./stats.js";
 import { probe as zernioProbe } from "./zernio.js";
@@ -211,6 +212,14 @@ app.post("/webhook/whatsapp", (req, res) => {
   } catch (err) {
     console.error("[delivrou-notify] Erreur traitement webhook WhatsApp:", err);
   }
+});
+
+// Code de verification par WhatsApp (appele par le serveur de l'application, jamais par un navigateur).
+// Le code n'est ni enregistre, ni journalise, ni renvoye.
+app.post("/otp/send", requireAuth, async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const r = await sendOtp(String(req.body?.phone ?? ""), String(req.body?.code ?? ""), String(req.body?.ip ?? ""));
+  res.status(r.status).json(r.ok ? { ok: true } : { ok: false, error: r.error });
 });
 
 // Diagnostic : mode actif, etat du numero, abonnement de l'app au compte WhatsApp Business, webhooks recus.
