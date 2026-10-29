@@ -31,8 +31,7 @@ export function queueLength(): number {
 
 /** Un parametre de modele tient sur une ligne : pas de retour a la ligne ni de longues series d'espaces. */
 function oneLine(text: string): string {
-  return text.replace(/\s*[
-	]+\s*/g, " · ").replace(/ {2,}/g, " ").trim().slice(0, 700);
+  return text.replace(/\s*[\r\n\t]+\s*/g, " · ").replace(/ {2,}/g, " ").trim().slice(0, 700);
 }
 
 export type SendSource = "auto" | "manual";
