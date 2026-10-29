@@ -182,18 +182,58 @@ app.get("/webhook/whatsapp", (req, res) => {
   return res.sendStatus(403);
 });
 
+// Compteurs de diagnostic (aucun contenu de message, aucun secret).
+const hook = { received: 0, badSignature: 0, ignoredWrongProvider: 0, lastAt: 0, lastKinds: "" };
+
 app.post("/webhook/whatsapp", (req, res) => {
   if (!(process.env.WHATSAPP_VERIFY_TOKEN || process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN)) return res.sendStatus(404);
   const raw = (req as unknown as { rawBody?: Buffer }).rawBody;
-  if (!metaClient.verifySignature(raw, req.header("x-hub-signature-256"))) return res.sendStatus(401);
+  if (!metaClient.verifySignature(raw, req.header("x-hub-signature-256"))) {
+    hook.badSignature++;
+    return res.sendStatus(401);
+  }
+  hook.received++;
+  hook.lastAt = Date.now();
+  try {
+    const v = (req.body as IncomingWebhook)?.entry?.[0]?.changes?.[0]?.value;
+    hook.lastKinds = [v?.messages?.length ? `${v.messages.length} message(s)` : "", v?.statuses?.length ? `${v.statuses.length} statut(s)` : ""].filter(Boolean).join(", ") || "autre evenement";
+  } catch {
+    /* sans importance */
+  }
   // Accuser reception tout de suite : Meta reessaie si la reponse tarde.
   res.sendStatus(200);
-  if (process.env.WHATSAPP_PROVIDER !== "meta") return; // mode QR code : on ignore les messages Meta
+  if (process.env.WHATSAPP_PROVIDER !== "meta") {
+    hook.ignoredWrongProvider++;
+    return; // mode QR code : on ignore les messages Meta
+  }
   try {
     metaClient.handleWebhook(req.body as IncomingWebhook);
   } catch (err) {
     console.error("[delivrou-notify] Erreur traitement webhook WhatsApp:", err);
   }
+});
+
+// Diagnostic : mode actif, etat du numero, abonnement de l'app au compte WhatsApp Business, webhooks recus.
+app.get("/whatsapp/diagnostic", requireAuth, async (req, res) => {
+  const waba = String(req.query.waba || process.env.WHATSAPP_WABA_ID || "").replace(/\D/g, "");
+  let subscribed: unknown = null;
+  if (waba && process.env.WHATSAPP_PROVIDER === "meta") subscribed = await metaClient.graph(`${waba}/subscribed_apps`);
+  res.json({
+    ok: true,
+    providerEnv: process.env.WHATSAPP_PROVIDER || "(absent = baileys)",
+    client: whatsapp.getInfo(),
+    verifyTokenConfigured: Boolean(process.env.WHATSAPP_VERIFY_TOKEN || process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN),
+    appSecretConfigured: Boolean(process.env.WHATSAPP_APP_SECRET),
+    webhook: hook,
+    subscribedApps: subscribed,
+  });
+});
+
+// Abonne l'application Meta au compte WhatsApp Business : sans ca, Meta n'envoie aucun message entrant.
+app.post("/whatsapp/subscribe", requireAuth, async (req, res) => {
+  const waba = String(req.body?.waba || process.env.WHATSAPP_WABA_ID || "").replace(/\D/g, "");
+  if (!waba) return res.status(400).json({ ok: false, error: "waba requis" });
+  res.json({ ok: true, result: await metaClient.graph(`${waba}/subscribed_apps`, "POST") });
 });
 
 app.post("/check", requireAuth, async (req, res) => {

@@ -132,6 +132,13 @@ class MetaClient {
     }
   }
 
+  /** Appel direct a l'API Graph (diagnostic et abonnement du webhook). Ne renvoie jamais le jeton. */
+  async graph(pathAndQuery: string, method: "GET" | "POST" = "GET"): Promise<{ status: number; body: unknown }> {
+    if (!ACCESS_TOKEN) return { status: 0, body: { error: "WHATSAPP_ACCESS_TOKEN manquant" } };
+    const r = await fetch(`${GRAPH}/${pathAndQuery}`, { method, headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
+    return { status: r.status, body: await r.json().catch(() => ({})) };
+  }
+
   /** L'API officielle ne permet pas de tester un numero a l'avance : on laisse l'envoi trancher. */
   async numberHasWhatsApp(_phoneDigits: string): Promise<boolean> {
     return true;
