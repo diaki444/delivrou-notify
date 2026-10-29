@@ -63,3 +63,14 @@ Aucun prix, aucun délai, aucun paiement en espèces.
 - Meta facture certaines conversations (surtout celles ouvertes par une entreprise). Vérifier la grille tarifaire dans Gestionnaire WhatsApp avant d'envoyer en volume.
 - L'API ne permet pas de tester à l'avance si un numéro a WhatsApp : l'envoi tranche.
 - Si le même numéro est aussi utilisé dans l'application WhatsApp Business (« coexistence »), vérifier dans Gestionnaire WhatsApp que les deux modes sont actifs.
+
+## Modèle de secours (messages automatiques)
+Les messages envoyés par l'application (« commande créée »…) partent en texte libre. Si Meta les refuse parce que le client n'a pas écrit depuis plus de 24 h, le serveur **renvoie automatiquement le même texte** dans un modèle approuvé. À activer avec :
+```
+WHATSAPP_FALLBACK_TEMPLATE=notification_commande
+WHATSAPP_FALLBACK_LANG=fr        (facultatif)
+```
+Modèle à créer dans Gestionnaire WhatsApp (catégorie Utilitaire, français) :
+> Bonjour, voici une mise à jour de ta commande Delivrou : {{1}} Merci de ta confiance.
+
+Les retours à la ligne du message d'origine sont remplacés par « · » (Meta n'en accepte pas dans une variable). Seuls les envois automatiques (`source: auto`) utilisent ce secours : une réponse écrite à la main dans le QG affiche l'erreur claire.

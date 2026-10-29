@@ -34,7 +34,7 @@ class WhatsAppClient {
     return { provider: "baileys", connected: this.connected, number: null as string | null, error: null as string | null };
   }
 
-  async sendTemplate(_target: string, _name: string, _params?: string[], _lang?: string): Promise<void> {
+  async sendTemplate(_target: string, _name: string, _params?: string[], _lang?: string, _shown?: string): Promise<void> {
     throw new Error("Les modeles de message demandent l'API officielle Meta (WHATSAPP_PROVIDER=meta).");
   }
 
@@ -217,7 +217,7 @@ export interface WhatsAppProvider {
   connect(): Promise<void>;
   numberHasWhatsApp(phoneDigits: string): Promise<boolean>;
   sendText(target: string, text: string): Promise<void>;
-  sendTemplate(target: string, name: string, params?: string[], lang?: string): Promise<void>;
+  sendTemplate(target: string, name: string, params?: string[], lang?: string, shownText?: string): Promise<void>;
 }
 
 /**

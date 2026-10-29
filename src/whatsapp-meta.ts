@@ -56,6 +56,18 @@ export interface IncomingWebhook {
 
 const jidOf = (digits: string) => `${digits}@s.whatsapp.net`;
 
+/** Erreur Meta avec son code : permet de reconnaitre la fenetre de 24 h fermee. */
+export class MetaError extends Error {
+  constructor(message: string, readonly code?: number) {
+    super(message);
+    this.name = "MetaError";
+  }
+  /** Hors fenetre de 24 h : seul un modele approuve est accepte. */
+  get windowClosed(): boolean {
+    return this.code === 131047 || this.code === 131051;
+  }
+}
+
 function explain(code: number | undefined, fallback: string): string {
   switch (code) {
     case 131047:
@@ -154,7 +166,7 @@ class MetaClient {
     const j = (await r.json().catch(() => ({}))) as { messages?: Array<{ id?: string }>; error?: { code?: number; message?: string; error_data?: { details?: string } } };
     if (!r.ok || j.error) {
       const msg = explain(j.error?.code, j.error?.error_data?.details || j.error?.message || `HTTP ${r.status}`);
-      throw new Error(msg);
+      throw new MetaError(msg, j.error?.code);
     }
     return j.messages?.[0]?.id;
   }
@@ -171,12 +183,12 @@ class MetaClient {
   }
 
   /** Message modele approuve (seul autorise hors de la fenetre de 24 h). */
-  async sendTemplate(target: string, name: string, params: string[] = [], lang = "fr"): Promise<void> {
+  async sendTemplate(target: string, name: string, params: string[] = [], lang = "fr", shownText?: string): Promise<void> {
     const to = this.digits(target);
     if (!to) throw new Error("Numéro illisible");
     const components = params.length ? [{ type: "body", parameters: params.map((p) => ({ type: "text", text: String(p) })) }] : undefined;
     const id = await this.post({ to, type: "template", template: { name, language: { code: lang }, ...(components ? { components } : {}) } });
-    recordMessage({ id: id ?? `meta-${Date.now()}`, chatJid: jidOf(to), fromMe: true, text: `[modèle ${name}] ${params.join(" · ")}`.trim(), timestamp: Date.now() });
+    recordMessage({ id: id ?? `meta-${Date.now()}`, chatJid: jidOf(to), fromMe: true, text: shownText ?? `[modèle ${name}] ${params.join(" · ")}`.trim(), timestamp: Date.now() });
   }
 
   // ---------- webhook ----------
