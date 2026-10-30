@@ -19,6 +19,7 @@ import express, { type Request, type Response, type NextFunction } from "express
 import { requireDashboardAuth } from "./auth.js";
 import { getLatestByPlatform, weeklySeries, getLastRun } from "./stats.js";
 import { qgApiRouter } from "./qg-api.js";
+import { studioRouter } from "./studio.js";
 
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
 const QG_DIR = path.join(AUTH_DIR, "qg");
@@ -165,6 +166,8 @@ qgRouter.use(requireDashboardAuth);
 
 // Conversations, prospects, journal : les memes donnees que le tableau de
 // bord, en JSON, pour que le QG les affiche dans ses propres onglets.
+// Studio : creation d'affiches, photos et videos (cle Higgsfield cote serveur).
+qgRouter.use("/api/studio", studioRouter);
 qgRouter.use("/api", qgApiRouter);
 
 /** Etat partage, lu par les deux appareils. */
