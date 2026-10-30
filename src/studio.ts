@@ -77,6 +77,7 @@ interface Entree {
   note: "aime" | "pas" | null;
   erreur?: string;
   pilier?: string;
+  final?: boolean;
   legendes?: Legendes;
 }
 interface PostPlanifie {
@@ -288,23 +289,20 @@ function construireCommande(d: Demande, j: Entree[]): string {
   const scene = STRUCTURES[d.structure] || "";
   const format = FORMATS[d.format] || FORMATS["4:5"];
   if (d.genre === "affiche") {
-    const textes = [
-      d.titre && `Headline (large, heavy rounded geometric sans-serif, 4 to 8 words, the key word highlighted in a different color or with a hand-drawn underline): "${d.titre}"`,
-      d.sous && `Supporting line (smaller): "${d.sous}"`,
-      d.bouton && `Call-to-action button (rounded pill): "${d.bouton}"`,
-      `Footer text: "www.delivrou.com"`,
-      `Brand wordmark in the footer: "Delivrou"`,
-    ].filter(Boolean);
+    const titre = d.titre || "Ton colis, suivi en direct";
+    const virgule = titre.indexOf(",");
+    const ligne1 = virgule > 0 ? titre.slice(0, virgule + 1) : titre.split(" ").slice(0, Math.ceil(titre.split(" ").length / 2)).join(" ");
+    const ligne2 = virgule > 0 ? titre.slice(virgule + 1).trim() : titre.split(" ").slice(Math.ceil(titre.split(" ").length / 2)).join(" ");
     return [
-      `Design a complete, finished, professional advertising poster for a parcel delivery mobile app in Conakry, Guinea. ${format}. Style of the best modern fintech and delivery-app campaign posters (bold, premium, energetic, clean), not generic AI art.`,
+      `Vertical ${d.format === "9:16" ? "9:16" : "4:5"} premium social media poster for a parcel delivery app, in the style of a top-tier fintech app advertisement. Upper two-thirds: rich solid vivid orange background with a soft gradient from #EC6B2C to #F4923F, a subtle glow behind the person, thin white hand-drawn sketch strokes and light streaks. Bottom third: clean white area, with a big smooth curved edge rising into the orange area. Leave the top 12% of the poster EMPTY orange (no logo, no text) and leave the bottom-right of the white footer EMPTY.`,
+      `Headline, centered below the empty top band, huge bold rounded geometric sans-serif, two lines: white "${ligne1}" then italic yellow (#FFD84A) "${ligne2}".${d.sous ? ` Under it a two-line white subtitle: "${d.sous}"` : ""}`,
       `Concept: ${d.idee}.`,
       scene && `Composition: ${scene}.`,
-      "Background: a bold, saturated orange gradient field (#EC6B2C to #F4923F) with a soft glow, cream #F6F1EA accents, a large circle or arc shape behind the subject, thin dotted route lines and a big white curve near the bottom.",
-      "Hero: a real, joyful, authentic Guinean person with a big natural smile, cut out and slightly overflowing the shape behind them, holding a modern smartphone upright with its screen facing the viewer. The phone screen shows a clean orange delivery app: a map, a progress tracker and a delivery code. Realistic hands.",
-      "Floating 3D glossy elements around the phone: a plain brown cardboard parcel with tape, a map pin, a check mark, a small notification card. Depth and soft shadows.",
-      "Footer: a dark #12141A band containing the brand wordmark, the website and small App Store style badge.",
-      `ALL TEXT must be rendered in French, spelled EXACTLY as given, with correct accents, no extra words and no other text anywhere:\n${textes.join("\n")}`,
-      "Never show food, meals, pharmacy items, prices, delivery times, numbers of customers, or any other brand logo.",
+      "Center hero: a real, joyful young Guinean person, huge natural open smile, wearing a plain orange t-shirt, upper body cut out and overflowing in front of the shapes behind, photorealistic studio lighting, crisp details. With one hand they hold up a modern smartphone, screen facing the viewer, the screen showing a clean simple app screen with a white map and one big orange location pin, no tiny text. The other arm is bent and the index finger clearly POINTS at the phone, a confident 'look at this' gesture. Realistic hands.",
+      "Behind and around the person a large glossy 3D orange ring/arc sweeps from left to right, with a dotted white route line winding along it, carrying floating glossy 3D elements: a plain cardboard parcel with tape, a red map pin, a green delivery-done check badge, a small courier on an orange motorbike carrying a box, plus soft glass bubbles, sparkles and light reflections. Strong depth, soft shadows, glossy premium 3D render look, wow effect.",
+      `White footer: bold dark text on the left, "Télécharge l'app" and below it "Delivrou" in orange. Right side empty.${d.bouton ? ` Small button label if any: "${d.bouton}".` : ""}`,
+      "ALL TEXT must be French, spelled EXACTLY as given, with correct accents, and no other text anywhere.",
+      "Strict: no logos, no brand names other than Delivrou, no food, meals or pharmacy items, no prices, no delivery times, no numbers, no extra text.",
       aimes.length && `Spirit of posters the team liked: ${aimes.join("; ")}.`,
       pasAimes.length && `Avoid the direction of: ${pasAimes.join("; ")}.`,
     ]
@@ -547,6 +545,26 @@ studioRouter.post("/generer", async (req: Request, res: Response) => {
   recents.push(maintenant);
   void produire(id, modele, duree);
   res.status(202).json({ ok: true, id });
+});
+
+studioRouter.post("/finaliser", express.raw({ type: "image/png", limit: "12mb" }), async (req, res) => {
+  const id = String(req.query.id || "");
+  const png = req.body as Buffer;
+  const estPng = Buffer.isBuffer(png) && png.length > 1000 && png.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  if (!estPng) {
+    res.status(400).json({ ok: false, erreur: "Image invalide." });
+    return;
+  }
+  const trouve = await modifierJournal((j) => {
+    const e = j.find((x) => x.id === id);
+    if (!e || e.statut !== "pret" || e.genre !== "affiche" || e.type !== "image") return false;
+    const fichier = `${e.id}-final.png`;
+    fs.writeFileSync(path.join(CREATIONS, fichier), png);
+    e.fichier = fichier;
+    e.final = true;
+    return true;
+  });
+  res.status(trouve ? 200 : 404).json({ ok: trouve });
 });
 
 studioRouter.post("/noter", async (req, res) => {
