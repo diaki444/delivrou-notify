@@ -78,6 +78,10 @@ interface Entree {
   erreur?: string;
   pilier?: string;
   final?: boolean;
+  gabarit?: string;
+  original?: string;
+  pastille?: string;
+  ecran?: string;
   legendes?: Legendes;
 }
 interface PostPlanifie {
@@ -282,6 +286,27 @@ interface Demande {
   sous: string;
   bouton: string;
 }
+const PERSONNAGES: Record<string, { desc: string; tenue: string }> = {
+  homme: { desc: "a real young Guinean man in his late twenties, short hair, light stubble", tenue: "a plain bright orange crew-neck t-shirt" },
+  femme: { desc: "a real young Guinean woman in her late twenties, natural hair, elegant", tenue: "a plain bright orange blouse with a small colourful wax-print scarf" },
+  livreur: { desc: "a real young Guinean delivery courier in his early twenties, athletic", tenue: "a plain bright orange zip jacket and a plain black helmet worn on the head" },
+};
+const POSES: Record<string, string> = {
+  montre: "his or her right hand held out open to the side, palm up, presenting something off-frame, big warm smile, body slightly turned",
+  pointe: "one arm extended with the index finger clearly pointing to the side, the other hand relaxed, excited smile",
+  pouce: "one hand giving a confident thumbs up, the other relaxed, big smile",
+  rit: "laughing joyfully, both hands clasped near the chest, body slightly turned, head tilted",
+};
+function commandePersonnage(persona: string, pose: string): string {
+  const p = PERSONNAGES[persona] || PERSONNAGES.homme;
+  return [
+    `Professional studio photograph, waist-up, ${p.desc}, wearing ${p.tenue} with absolutely no text, logo, print or lettering on the clothes.`,
+    `Pose: ${POSES[pose] || POSES.montre}. Genuine joyful natural expression, looking at the camera.`,
+    "Soft studio lighting, crisp detail, realistic skin, realistic hands and fingers, shot on a full-frame camera.",
+    "Photographed against a perfectly flat, uniform, pure chroma-key green background (#00B140), no gradient, no shadow on the background, nothing in the hands, no phone, no props, no objects, no text, no logo.",
+  ].join(" ");
+}
+
 function construireCommande(d: Demande, j: Entree[]): string {
   const memo = (note: "aime" | "pas") => j.filter((e) => e.note === note && e.genre === d.genre).slice(-3).map((e) => e.idee);
   const aimes = memo("aime");
@@ -475,6 +500,15 @@ studioRouter.post("/generer", async (req: Request, res: Response) => {
     return;
   }
   const b = (req.body ?? {}) as Record<string, unknown>;
+  const gabarit = b.gabarit === "delivrou-a" ? "delivrou-a" : "";
+  if (gabarit) {
+    b.genre = "photo";
+    b.type = "image";
+    b.format = "4:5";
+    b.modele = "auto";
+    b.idee = t(b.idee, 600) || `Affiche ${t(b.titre, 120).replace("|", " ")}`;
+    b.prompt = commandePersonnage(t(b.persona, 12), t(b.pose, 12));
+  }
   const genre: Genre = b.genre === "affiche" ? "affiche" : "photo";
   const type: Kind = b.type === "video" ? "video" : "image";
   const cat = catalogue();
@@ -526,6 +560,9 @@ studioRouter.post("/generer", async (req: Request, res: Response) => {
       titre: t(b.titre, 120),
       sous: t(b.sous, 120),
       pilier: PILIERS.includes(String(b.pilier)) ? String(b.pilier) : undefined,
+      gabarit: gabarit || undefined,
+      pastille: gabarit ? t(b.pastille, 30) : undefined,
+      ecran: gabarit ? t(b.ecran, 30).replace(/[^a-z0-9-]/gi, "") : undefined,
       type,
       format: t(b.format, 8) || "4:5",
       modele: modele.id,
@@ -557,9 +594,10 @@ studioRouter.post("/finaliser", express.raw({ type: "image/png", limit: "12mb" }
   }
   const trouve = await modifierJournal((j) => {
     const e = j.find((x) => x.id === id);
-    if (!e || e.statut !== "pret" || e.genre !== "affiche" || e.type !== "image") return false;
+    if (!e || e.statut !== "pret" || e.type !== "image" || (e.genre !== "affiche" && !e.gabarit)) return false;
     const fichier = `${e.id}-final.png`;
     fs.writeFileSync(path.join(CREATIONS, fichier), png);
+    if (!e.final) e.original = e.fichier ?? undefined;
     e.fichier = fichier;
     e.final = true;
     return true;
