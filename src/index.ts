@@ -230,6 +230,7 @@ app.get("/whatsapp/diagnostic", requireAuth, async (req, res) => {
   res.json({
     ok: true,
     providerEnv: process.env.WHATSAPP_PROVIDER || "(absent = baileys)",
+    statuts: metaClient.recentStatuses.slice(-15),
     client: whatsapp.getInfo(),
     verifyTokenConfigured: Boolean(process.env.WHATSAPP_VERIFY_TOKEN || process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN),
     appSecretConfigured: Boolean(process.env.WHATSAPP_APP_SECRET),

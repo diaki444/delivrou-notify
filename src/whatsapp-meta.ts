@@ -90,6 +90,8 @@ function explain(code: number | undefined, fallback: string): string {
 }
 
 class MetaClient {
+  /** Derniers accuses de livraison recus de Meta (destinataire masque, aucun contenu de message). */
+  readonly recentStatuses: Array<{ at: number; status: string; to: string; code?: number; titre?: string }> = [];
   readonly provider = "meta" as const;
   private ok = false;
   private timer: NodeJS.Timeout | null = null;
@@ -236,6 +238,9 @@ class MetaClient {
         const names = new Map<string, string | undefined>((value.contacts ?? []).map((c) => [c.wa_id ?? "", c.profile?.name]));
 
         for (const st of value.statuses ?? []) {
+          const dest = st.recipient_id ?? "";
+          this.recentStatuses.push({ at: Date.now(), status: st.status ?? "?", to: dest.length <= 5 ? "***" : `${dest.slice(0, 3)}***${dest.slice(-2)}`, code: st.errors?.[0]?.code, titre: st.errors?.[0]?.title || st.errors?.[0]?.message });
+          if (this.recentStatuses.length > 30) this.recentStatuses.shift();
           if (st.status === "failed") {
             const e = st.errors?.[0];
             console.error(`[delivrou-notify] Meta : message non remis a ${st.recipient_id} : ${explain(e?.code, e?.title || e?.message || "echec")}`);
