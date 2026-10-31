@@ -949,9 +949,9 @@ interface Scenario {
   scenes: Scene[];
 }
 
-const OBJETS_BASE = ["obj-colis", "obj-repere", "obj-scooter", "obj-coche", "obj-bouclier", "obj-cloche", "obj-bulle", "obj-cle"];
-const DECORS_BASE = ["dec-rue", "dec-marche", "dec-ville", "dec-nuit", "dec-moto", "dec-salon"];
-const PERSOS_BASE = ["per-maman", "per-jeune-femme", "per-entrepreneur", "per-livreur2"];
+const OBJETS_BASE = ["obj-colis", "obj-repere", "obj-scooter", "obj-coche", "obj-bouclier", "obj-cloche", "obj-bulle", "obj-cle", "obj-telephone", "obj-horloge", "obj-casque", "obj-etoile", "obj-coeur", "obj-enveloppe", "obj-fusee"];
+const DECORS_BASE = ["dec-rue", "dec-marche", "dec-ville", "dec-nuit", "dec-moto", "dec-salon", "dec-aeroport", "dec-plage", "dec-bureau", "dec-quartier", "dec-pluie"];
+const PERSOS_BASE = ["per-maman", "per-jeune-femme", "per-entrepreneur", "per-livreur2", "per-papa", "per-etudiante", "per-commercant", "per-livreuse", "per-ado"];
 const BIBLIO_DIR = path.join(path.dirname(STUDIO_DIR), "biblio");
 const BIBLIO_INDEX = path.join(BIBLIO_DIR, "index.json");
 interface ElementBiblio {
