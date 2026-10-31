@@ -24,6 +24,13 @@ const CREATIONS = path.join(STUDIO_DIR, "creations");
 const JOURNAL = path.join(STUDIO_DIR, "journal.json");
 const PLANNING = path.join(STUDIO_DIR, "planning.json");
 const MODELES_FILE = path.join(STUDIO_DIR, "modeles.json");
+const REPORTS_FILE = path.join(STUDIO_DIR, "reports.json");
+interface Report {
+  semaine: string;
+  jour: number;
+  heure: string;
+}
+const reports = () => readJson<Record<string, Report>>(REPORTS_FILE, {});
 const API = "https://api.higgsfield.ai";
 const MARGE = 1.25; // securite sur les prix estimes : le budget est verifie avec cette marge
 
@@ -479,8 +486,9 @@ studioRouter.get("/etat", (_req, res) => {
     piliers: PILIERS,
     modeles: cat.modeles.map((m) => ({ id: m.id, nom: m.nom, type: m.type, genres: m.genres || ["photo"], prix: m.prix, qualite: m.qualite, pour: m.pour, min: m.min, max: m.max, durees: m.durees, verifie: m.verifie })),
     recommandes: { photo: recommander("image", "photo"), affiche: recommander("image", "affiche"), video: recommander("video", "photo") },
-    journal: j.slice().reverse().slice(0, 80),
+    journal: j.slice().reverse().slice(0, 300),
     planning: planning(),
+    reports: reports(),
   });
 });
 
@@ -675,6 +683,30 @@ studioRouter.post("/approuver", (req, res) => {
   liste.push(post);
   writeJson(PLANNING, liste);
   res.json({ ok: true, post });
+});
+
+/** Deplace un post du calendrier (de la base ou du Studio) vers une autre semaine / un autre jour, sans rien supprimer. */
+studioRouter.post("/reporter", (req, res) => {
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const id = t(b.id, 120);
+  if (!id) {
+    res.status(400).json({ ok: false, erreur: "Post inconnu." });
+    return;
+  }
+  const liste = reports();
+  if (b.annuler) delete liste[id];
+  else {
+    const semaine = t(b.semaine, 10);
+    const lundi = new Date(`${semaine}T12:00:00Z`);
+    const jour = Math.round(Number(b.jour));
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(semaine) || Number.isNaN(lundi.getTime()) || lundi.getUTCDay() !== 1 || !(jour >= 1 && jour <= 7)) {
+      res.status(400).json({ ok: false, erreur: "Semaine ou jour invalide." });
+      return;
+    }
+    liste[id] = { semaine, jour, heure: /^\d{2}:\d{2}$/.test(String(b.heure)) ? String(b.heure) : "12:30" };
+  }
+  writeJson(REPORTS_FILE, liste);
+  res.json({ ok: true, reports: liste });
 });
 
 studioRouter.post("/retirer", (req, res) => {
