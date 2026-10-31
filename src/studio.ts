@@ -80,6 +80,8 @@ interface Entree {
   final?: boolean;
   gabarit?: string;
   original?: string;
+  nom?: string;
+  duree?: number;
   pastille?: string;
   ecran?: string;
   legendes?: Legendes;
@@ -501,8 +503,8 @@ async function genererHandler(req: Request, res: Response) {
     return;
   }
   const b = (req.body ?? {}) as Record<string, unknown>;
-  const gabarit = b.gabarit === "delivrou-a" ? "delivrou-a" : "";
-  if (gabarit) {
+  const gabarit = b.gabarit === "delivrou-a" ? "delivrou-a" : b.gabarit === "biblio" ? "biblio" : b.gabarit === "plan" ? "plan" : "";
+  if (gabarit === "delivrou-a") {
     b.genre = "photo";
     b.type = "image";
     b.format = "4:5";
@@ -562,8 +564,10 @@ async function genererHandler(req: Request, res: Response) {
       sous: t(b.sous, 120),
       pilier: PILIERS.includes(String(b.pilier)) ? String(b.pilier) : undefined,
       gabarit: gabarit || undefined,
-      pastille: gabarit ? t(b.pastille, 30) : undefined,
-      ecran: gabarit ? t(b.ecran, 30).replace(/[^a-z0-9-]/gi, "") : undefined,
+      pastille: gabarit === "delivrou-a" ? t(b.pastille, 30) : undefined,
+      ecran: gabarit === "delivrou-a" ? t(b.ecran, 30).replace(/[^a-z0-9-]/gi, "") : undefined,
+      nom: gabarit === "biblio" ? t(b.nom, 40).replace(/[^a-z0-9-]/gi, "") : undefined,
+      duree: type === "video" ? duree : undefined,
       type,
       format: t(b.format, 8) || "4:5",
       modele: modele.id,
@@ -920,7 +924,9 @@ interface Message {
   texte: string;
 }
 interface Scene {
-  type: "titre" | "chat" | "tel" | "notif" | "avatar" | "cta";
+  type: "titre" | "chat" | "tel" | "notif" | "avatar" | "cta" | "plan";
+  plan?: string;
+  duree?: number;
   dur?: number;
   fond?: string;
   haut?: string;
@@ -943,9 +949,22 @@ interface Scenario {
   scenes: Scene[];
 }
 
-const OBJETS = ["obj-colis", "obj-repere", "obj-scooter", "obj-coche", "obj-bouclier", "obj-cloche", "obj-bulle", "obj-cle"];
-const DECORS = ["dec-rue", "dec-marche", "dec-ville", "dec-nuit", "dec-moto", "dec-salon"];
-const PERSOS = ["per-maman", "per-jeune-femme", "per-entrepreneur", "per-livreur2"];
+const OBJETS_BASE = ["obj-colis", "obj-repere", "obj-scooter", "obj-coche", "obj-bouclier", "obj-cloche", "obj-bulle", "obj-cle"];
+const DECORS_BASE = ["dec-rue", "dec-marche", "dec-ville", "dec-nuit", "dec-moto", "dec-salon"];
+const PERSOS_BASE = ["per-maman", "per-jeune-femme", "per-entrepreneur", "per-livreur2"];
+const BIBLIO_DIR = path.join(path.dirname(STUDIO_DIR), "biblio");
+const BIBLIO_INDEX = path.join(BIBLIO_DIR, "index.json");
+interface ElementBiblio {
+  nom: string;
+  genre: "objet" | "decor" | "portrait";
+  desc: string;
+  ext: string;
+}
+const biblioPerso = () => readJson<ElementBiblio[]>(BIBLIO_INDEX, []);
+const objetsDispo = () => [...OBJETS_BASE, ...biblioPerso().filter((e) => e.genre === "objet").map((e) => e.nom)];
+const decorsDispo = () => [...DECORS_BASE, ...biblioPerso().filter((e) => e.genre === "decor").map((e) => e.nom)];
+const persosDispo = () => [...PERSOS_BASE, ...biblioPerso().filter((e) => e.genre === "portrait").map((e) => e.nom)];
+const plansDispo = () => journal().filter((e) => e.gabarit === "plan" && e.statut === "pret" && e.fichier);
 
 const HISTOIRES: Scenario[] = [
   {
@@ -981,14 +1000,17 @@ function validerScenario(brut: unknown): Scenario | null {
     const lignes = Array.isArray(r.lignes) ? r.lignes.slice(0, 3).map((l) => clip(l, 34)).filter(Boolean) : [];
     const fondBrut = String(r.fond);
     const base = {
-      fond: ["sombre", "clair", "orange"].includes(fondBrut) || DECORS.includes(fondBrut) ? fondBrut : "sombre",
+      fond: ["sombre", "clair", "orange"].includes(fondBrut) || decorsDispo().includes(fondBrut) ? fondBrut : "sombre",
       haut: clip(r.haut, 40),
       sous: clip(r.sous, 60),
       voix: clip(r.voix, 160),
-      objets: listeChoisie(r.objets, OBJETS, 3),
+      objets: listeChoisie(r.objets, objetsDispo(), 3),
     };
-    if (type === "titre" && lignes.length) scenes.push({ type, ...base, lignes });
-    else if (type === "avatar" && lignes.length && PERSOS.includes(String(r.avatar))) scenes.push({ type, ...base, lignes, avatar: String(r.avatar) });
+    if (type === "plan") {
+      const p = plansDispo().find((e) => e.id === String(r.plan));
+      if (p) scenes.push({ type, ...base, plan: p.id, duree: Math.min(10, Math.max(3, Number(p.duree) || 5)), lignes });
+    } else if (type === "titre" && lignes.length) scenes.push({ type, ...base, lignes });
+    else if (type === "avatar" && lignes.length && persosDispo().includes(String(r.avatar))) scenes.push({ type, ...base, lignes, avatar: String(r.avatar) });
     else if (type === "chat" && Array.isArray(r.messages)) {
       const messages = r.messages.slice(0, 4).map((m) => ({ de: (m as Record<string, unknown>)?.de === "moi" ? ("moi" as const) : ("autre" as const), texte: clip((m as Record<string, unknown>)?.texte, 52) })).filter((m) => m.texte);
       if (messages.length) scenes.push({ type, ...base, contact: clip(r.contact, 16) || "Maman", messages });
@@ -1024,7 +1046,7 @@ studioRouter.post("/scenario", async (req: Request, res: Response) => {
   const deja = j.slice(-6).map((e) => "- " + e.titre).join("\n") || "(rien)";
   const consigne = [
     "Tu écris le scénario d'une vidéo de motion design de 28 à 36 secondes pour Facebook et TikTok, pour Delivrou, service de livraison de COLIS à Conakry. Style : histoire courte et drôle avec un prénom guinéen, une situation que chacun connaît, une chute, puis la solution Delivrou, puis l'appel à l'action. Une voix off lit une phrase par scène : champ voix = la phrase lue (10 à 22 mots, ton complice et amusant, tutoiement, français simple). Pas de personnage qui bouge : seulement du texte animé, des maquettes, des objets 3D et des photos de décor.",
-    "Types de scènes : « titre » (haut = petite ligne grise ≤ 40 caractères ; lignes = 1 à 3 lignes ≤ 34 caractères ; *mot* entre étoiles = mot surligné ; fond = sombre|clair|orange|" + DECORS.join("|") + " ; objets = jusqu'à 3 objets 3D parmi " + OBJETS.join(", ") + " ; sous = sous-titre ≤ 60) ; « avatar » (comme titre, plus avatar parmi " + PERSOS.join(", ") + " : portrait rond) ; « chat » (contact, messages = 2 à 4 {de:moi|autre, texte ≤ 52}) ; « tel » (le téléphone avec la vraie app : ecran parmi " + ECRANS.join(", ") + ", legende ≤ 60, objets) ; « notif » (titre ≤ 44, cartes = 2 ou 3 {titre ≤ 28, texte ≤ 44}, heure facultative au format HH:MM) ; « cta » (dernière scène : lignes = 2 lignes courtes).",
+    "Types de scènes : « titre » (haut = petite ligne grise ≤ 40 caractères ; lignes = 1 à 3 lignes ≤ 34 caractères ; *mot* entre étoiles = mot surligné ; fond = sombre|clair|orange|" + decorsDispo().join("|") + " ; objets = jusqu'à 3 objets 3D parmi " + objetsDispo().join(", ") + " ; sous = sous-titre ≤ 60) ; « avatar » (comme titre, plus avatar parmi " + persosDispo().join(", ") + " : portrait rond) ; « chat » (contact, messages = 2 à 4 {de:moi|autre, texte ≤ 52}) ; « tel » (le téléphone avec la vraie app : ecran parmi " + ECRANS.join(", ") + ", legende ≤ 60, objets) ; « notif » (titre ≤ 44, cartes = 2 ou 3 {titre ≤ 28, texte ≤ 44}, heure facultative au format HH:MM) ; « cta » (dernière scène : lignes = 2 lignes courtes)." + (plansDispo().length ? " Plans animés déjà tournés que tu peux insérer avec « plan » (champ plan = identifiant, lignes facultatives pour un texte par-dessus) : " + plansDispo().map((e) => e.id + " = " + (e.titre || e.idee)).join(" ; ") + "." : ""),
     "Structure conseillée : accroche en 3 s, le problème, retournement « Sauf que… », la solution avec la vraie app (tel, notif), cta. 8 à 11 scènes. Choisis format 16:9 (par défaut) ou 9:16 si l'histoire s'y prête.",
     "RÈGLES STRICTES : le seul service est le COLIS (jamais de repas, pharmacie, épicerie) ; aucun délai chiffré ni prix ; aucune promesse de rapidité (jamais « vite », « rapide », « express ») ; aucun chiffre inventé ; pas de paiement en espèces ; aucune fausse urgence ; pas de concours ; rien de religieux ; pas de faux avis ni témoignage (petite histoire imaginée). Affirmations vraies pour l'app uniquement : suivi du livreur en direct sur la carte, notifications à chaque étape, code de livraison remis au livreur, prix affiché avant de valider, livreurs vérifiés.",
     sujet ? "Sujet demandé : " + sujet : "Choisis un sujet différent des précédents.",
@@ -1106,4 +1128,124 @@ studioRouter.post("/video-echec", async (req: Request, res: Response) => {
     }
   });
   res.json({ ok: true });
+});
+
+// ---------- enrichir la bibliotheque (objets 3D, decors, portraits) ----------
+const MODELES_BIBLIO = {
+  objet: (d: string) => "A single glossy 3D rendered " + d + ", premium smooth plastic and soft clay material, vivid orange (#EC6B2C) with cream accents, soft studio lighting with gentle reflections, centered and shown whole with generous margin around it, rendered against a perfectly flat uniform pure chroma-key green background (#00B140), no gradient, no shadow on the background, no text, no logo, no letters.",
+  decor: (d: string) => "Photograph, " + d + ", cinematic natural light, shallow depth of field, soft bokeh, realistic, shot on a full-frame camera, no text, no logo, no watermark, no readable signs, no people in focus.",
+  portrait: (d: string) => "Professional studio photograph, waist-up, " + d + ", genuine warm natural smile, looking at the camera, soft studio lighting, crisp detail, realistic skin and hands, photographed against a perfectly flat uniform pure chroma-key green background (#00B140), no gradient, no shadow on the background, nothing in the hands, no props, no text, no logo, no lettering on clothes.",
+};
+const slug = (v: string) => v.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24) || "element";
+
+studioRouter.get("/biblio", (_req, res) => {
+  res.json({ ok: true, base: { objets: OBJETS_BASE, decors: DECORS_BASE, portraits: PERSOS_BASE }, perso: biblioPerso() });
+});
+
+studioRouter.post("/biblio/ajouter", async (req: Request, res: Response) => {
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const genre = b.genre === "decor" ? "decor" : b.genre === "portrait" ? "portrait" : "objet";
+  const desc = clip(b.description, 200);
+  if (desc.length < 4 || verifierRegles(desc).length) {
+    res.status(422).json({ ok: false, erreur: desc.length < 4 ? "Décris l'élément en quelques mots." : "Description refusée par les règles de marque." });
+    return;
+  }
+  const prefixe = genre === "objet" ? "obj" : genre === "decor" ? "dec" : "per";
+  const nom = prefixe + "-" + slug(desc) + "-" + crypto.randomBytes(1).toString("hex");
+  req.body = { gabarit: "biblio", genre: "photo", type: "image", modele: "auto", format: genre === "decor" ? "16:9" : "4:5", idee: "Bibliothèque : " + desc, prompt: MODELES_BIBLIO[genre](desc), nom, structure: genre };
+  await genererHandler(req, res);
+});
+
+studioRouter.post("/biblio/finaliser", express.raw({ type: ["image/png", "image/jpeg"], limit: "12mb" }), async (req: Request, res: Response) => {
+  const id = String(req.query.id || "");
+  const img = req.body as Buffer;
+  const jpg = Boolean(req.headers["content-type"]?.startsWith("image/jpeg"));
+  const magique = Buffer.isBuffer(img) && img.length > 1000 && (jpg ? img[0] === 0xff && img[1] === 0xd8 : img.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47])));
+  if (!magique) {
+    res.status(400).json({ ok: false, erreur: "Image invalide." });
+    return;
+  }
+  const ok = await modifierJournal((j) => {
+    const e = j.find((x) => x.id === id);
+    if (!e || e.gabarit !== "biblio" || e.statut !== "pret" || e.final || !e.nom) return false;
+    const genre: ElementBiblio["genre"] = e.nom.startsWith("dec-") ? "decor" : e.nom.startsWith("per-") ? "portrait" : "objet";
+    const ext = genre === "decor" ? "jpg" : "png";
+    fs.mkdirSync(BIBLIO_DIR, { recursive: true });
+    fs.writeFileSync(path.join(BIBLIO_DIR, e.nom + "." + ext), img);
+    writeJson(BIBLIO_INDEX, [...biblioPerso().filter((x) => x.nom !== e.nom), { nom: e.nom, genre, desc: e.idee.replace("Bibliothèque : ", ""), ext }]);
+    e.final = true;
+    return true;
+  });
+  res.status(ok ? 200 : 404).json({ ok });
+});
+
+studioRouter.post("/biblio/supprimer", (req, res) => {
+  const nom = String((req.body as Record<string, unknown> | undefined)?.nom || "");
+  const liste = biblioPerso();
+  const el = liste.find((x) => x.nom === nom);
+  if (!el) {
+    res.status(404).json({ ok: false, erreur: "Seuls les éléments ajoutés peuvent être supprimés." });
+    return;
+  }
+  try {
+    fs.unlinkSync(path.join(BIBLIO_DIR, path.basename(el.nom + "." + el.ext)));
+  } catch {
+    /* fichier deja absent */
+  }
+  writeJson(BIBLIO_INDEX, liste.filter((x) => x.nom !== nom));
+  res.json({ ok: true });
+});
+
+const IDEES_BIBLIO: Record<string, string[]> = {
+  objet: ["téléphone avec un écran orange vide", "enveloppe avec un cachet", "boussole dorée", "portefeuille orange", "carte routière pliée avec un repère"],
+  decor: ["marché de nuit éclairé de lanternes, flou", "toit en terrasse au lever du soleil avec la ville en fond", "port avec des bateaux de pêche colorés au matin", "carrefour animé avec des taxis jaunes sous la pluie fine"],
+  portrait: ["un jeune livreur souriant avec une casquette orange", "une cliente élégante en robe wax", "un commerçant de quartier en chemise blanche", "une étudiante avec un sac à dos"],
+};
+studioRouter.post("/biblio/idees", async (req: Request, res: Response) => {
+  const genre = (req.body as Record<string, unknown> | undefined)?.genre === "decor" ? "decor" : (req.body as Record<string, unknown> | undefined)?.genre === "portrait" ? "portrait" : "objet";
+  const defaut = IDEES_BIBLIO[genre];
+  if (!isGeminiConfigured()) {
+    res.json({ ok: true, idees: defaut.slice(0, 4) });
+    return;
+  }
+  const deja = biblioPerso().map((e) => e.desc).join(" ; ") || "(rien)";
+  const consigne = "Tu aides Delivrou (livraison de COLIS à Conakry) à enrichir sa bibliothèque d'images de motion design. Propose 4 idées de " + (genre === "objet" ? "objets 3D glossy (un seul objet, simple, lié au colis, à la carte, au téléphone, à la confiance)" : genre === "decor" ? "décors photo réalistes sans personnage net (ambiances de Conakry et d'ailleurs : rues, marché, mer, intérieurs)" : "portraits de personnes guinéennes (waist-up) : clients, livreurs, commerçants") + ". Chaque idée = une description courte en français, 4 à 12 mots. Rien de religieux, pas d'alcool ni de tabac, pas de nourriture ni repas. Déjà dans la bibliothèque : " + deja + '. Réponds UNIQUEMENT par un tableau JSON de 4 chaînes : ["...","...","...","..."]';
+  const r = await askGeminiEmail(consigne);
+  const brut = r.ok && r.text ? lireJson(r.text) : null;
+  const liste = Array.isArray(brut) ? brut.map((x) => clip(x, 120)).filter((x) => x.length > 3 && !verifierRegles(x).length).slice(0, 4) : [];
+  res.json({ ok: true, idees: liste.length ? liste : defaut.slice(0, 4) });
+});
+
+// ---------- plans video animes (generes par Higgsfield, inseres dans le montage) ----------
+const PLANS_DEFAUT = [
+  { titre: "Le livreur dans la rue", description: "Un livreur à moto traverse une rue de Conakry au coucher du soleil, la caméra le suit doucement, lumière dorée, poussière dans l'air." },
+  { titre: "Le colis posé", description: "Des mains déposent un colis en carton sur une table en bois dans un salon chaleureux, lumière douce de fenêtre, mise au point lente." },
+  { titre: "La ville vue du ciel", description: "Vue aérienne lente sur une ville côtière tropicale au lever du soleil, la mer scintille, mouvement de caméra fluide." },
+];
+studioRouter.post("/plan/idees", async (req: Request, res: Response) => {
+  const contexte = clip((req.body as Record<string, unknown> | undefined)?.contexte, 200);
+  if (!isGeminiConfigured()) {
+    res.json({ ok: true, plans: PLANS_DEFAUT });
+    return;
+  }
+  const consigne = "Tu es directeur de la photographie pour Delivrou (livraison de COLIS à Conakry). Propose 3 plans vidéo courts (5 secondes) à insérer dans un montage de motion design : réalistes, cinématographiques, sans aucun texte ni écran de téléphone lisible, personnes de dos ou de loin si possible. Chaque plan : titre (≤ 30 caractères) et description en français (1 à 2 phrases : le sujet, le décor, la lumière, le mouvement de caméra)." + (contexte ? " Contexte de la vidéo : " + contexte + "." : "") + " Rien de religieux, pas de repas ni de nourriture, pas d'alcool ni de tabac, aucune promesse de rapidité. " + 'Réponds UNIQUEMENT par un tableau JSON : [{"titre":"","description":""}]';
+  const r = await askGeminiEmail(consigne);
+  const brut = r.ok && r.text ? lireJson(r.text) : null;
+  const plans = Array.isArray(brut)
+    ? brut.map((x) => ({ titre: clip((x as Record<string, unknown>)?.titre, 40), description: clip((x as Record<string, unknown>)?.description, 300) })).filter((x) => x.titre && x.description.length > 10 && !verifierRegles(x.titre, x.description).length).slice(0, 3)
+    : [];
+  res.json({ ok: true, plans: plans.length ? plans : PLANS_DEFAUT });
+});
+
+studioRouter.post("/plan/generer", async (req: Request, res: Response) => {
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const description = clip(b.description, 400);
+  if (description.length < 10 || verifierRegles(description).length) {
+    res.status(422).json({ ok: false, erreur: description.length < 10 ? "Décris le plan." : "Description refusée par les règles de marque." });
+    return;
+  }
+  const format = b.format === "9:16" ? "9:16" : "16:9";
+  const prompt = "Cinematic realistic shot: " + description + " Natural light, subtle handheld camera movement, shallow depth of field, shot on a full-frame cinema camera, warm colour grade, fine film grain. No text, no subtitles, no logos, no readable signs, no phone screens in focus, no watermark.";
+  req.body = { gabarit: "plan", genre: "photo", type: "video", modele: "kling-video/v2.5-turbo/pro/text-to-video", duree: 5, format, idee: "Plan animé : " + clip(b.titre, 40), titre: clip(b.titre, 40) || "Plan animé", prompt };
+  await genererHandler(req, res);
 });
