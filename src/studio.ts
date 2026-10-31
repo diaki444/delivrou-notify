@@ -184,6 +184,7 @@ const INTERDITS: Array<[RegExp, string]> = [
   [/\b(13 communes|\d+\s?(clients|livraisons))\b/i, "Aucun chiffre inventé (clients, livraisons, couverture)."],
   [/\b(hadith|allah|bismillah|alcool|porc|tabac|cigarette|casino)\b/i, "Rien de religieux, ni alcool, porc, tabac ou jeux d'argent."],
   [/\b(t[ée]moignage|avis client)\b/i, "Pas de faux avis ni de faux témoignage."],
+  [/\b(vite|rapide(ment)?|express|instantan[ée]?(ment)?|en un [ée]clair|imm[ée]diat(ement)?)\b/i, "Aucune promesse de rapidité : on ne dit pas « vite », « rapide » ni « express »."],
 ];
 const verifierRegles = (...textes: string[]) => {
   const t = textes.join(" ");
@@ -721,7 +722,7 @@ function consigneIdees(genre: Genre, type: Kind, brouillon: string, pilier: stri
     "Style visuel : champ de couleur orange franc (#EC6B2C vers #F4923F), crème, touches sombres ; un vrai humain guinéen, joyeux et naturel, qui sourit franchement ; le téléphone avec l'app (écran visible) et le colis en carton comme objets centraux ; formes courbes, éléments flottants en 3D ; look sobre et précis d'une app de livraison moderne (Uber Eats, Wolt, Careem), jamais d'image IA générique.",
     "Compositions possibles (champ structure) : a = une personne + un téléphone + grand titre ; b = deux moitiés séparées par un bord net (avant / après) ; c = un téléphone entouré d'éléments en orbite sur un cercle ; d = un livreur à moto sur une route qui s'enroule autour du téléphone ; e = un personnage qui sort de l'écran ; libre = autre.",
     "Piliers possibles (champ pilier, valeur exacte) : " + PILIERS.map((p) => `« ${p} »`).join(", ") + ".",
-    "RÈGLES STRICTES : le seul service disponible est le COLIS (jamais de repas, pharmacie, épicerie) ; aucun délai chiffré ni prix ; aucun chiffre inventé (clients, livraisons, communes) ; pas de paiement en espèces ; aucune fausse urgence ni pression ; pas de tirage au sort ni concours ; rien de religieux ; pas d'alcool, tabac, porc, jeux d'argent ; pas de faux avis ni témoignage ; aucune donnée personnelle visible. Tutoiement, français simple de Conakry, chaleureux.",
+    "RÈGLES STRICTES : le seul service disponible est le COLIS (jamais de repas, pharmacie, épicerie) ; aucun délai chiffré ni prix ; aucune promesse de rapidité (jamais « vite », « rapide », « express ») ; aucun chiffre inventé (clients, livraisons, communes) ; pas de paiement en espèces ; aucune fausse urgence ni pression ; pas de tirage au sort ni concours ; rien de religieux ; pas d'alcool, tabac, porc, jeux d'argent ; pas de faux avis ni témoignage ; aucune donnée personnelle visible. Tutoiement, français simple de Conakry, chaleureux.",
     pilier ? `Pilier demandé : ${pilier}.` : planifies ? `Posts déjà prévus (varie les piliers et les sujets) :\n${planifies}` : "",
     `Créations récentes (ne les répète pas) :\n${recents}`,
     aimes ? `L'équipe a aimé :\n${aimes}` : "",
@@ -822,7 +823,7 @@ async function briefAffiche(): Promise<Brief> {
   const consigne = [
     "Tu es le directeur artistique de Delivrou, service de livraison de COLIS à Conakry. Invente UNE affiche pour Facebook et TikTok.",
     "Champs : t1 et t2 = les deux lignes du titre (chacune 16 caractères maximum, espaces compris, sans point final) ; sous = une phrase d'appui de 60 caractères maximum ; pastille = 2 ou 3 mots (18 caractères maximum) pour une pastille ronde ; pose parmi montre, pointe, pouce, rit ; ecran parmi " + ECRANS.join(", ") + " (l'écran de l'app le plus adapté) ; pilier parmi " + PILIERS.map((p) => "« " + p + " »").join(", ") + ".",
-    "RÈGLES STRICTES : le seul service est le COLIS (jamais de repas, pharmacie, épicerie) ; aucun délai chiffré ni prix ; aucun chiffre inventé ; pas de paiement en espèces ; aucune fausse urgence ; pas de concours ; rien de religieux ; pas de faux avis. Tutoiement, français simple et chaleureux. Les affirmations doivent être vraies pour l'app : suivi en direct du livreur sur la carte, code de livraison à donner au livreur, prix affiché avant de valider, livreurs vérifiés.",
+    "RÈGLES STRICTES : le seul service est le COLIS (jamais de repas, pharmacie, épicerie) ; aucun délai chiffré ni prix ; aucune promesse de rapidité (jamais « vite », « rapide », « express ») ; aucun chiffre inventé ; pas de paiement en espèces ; aucune fausse urgence ; pas de concours ; rien de religieux ; pas de faux avis. Tutoiement, français simple et chaleureux. Les affirmations doivent être vraies pour l'app : suivi en direct du livreur sur la carte, code de livraison à donner au livreur, prix affiché avant de valider, livreurs vérifiés.",
     "Titres déjà faits (ne les répète pas) :\n" + deja,
     'Réponds UNIQUEMENT par un objet JSON valide : {"t1":"","t2":"","sous":"","pastille":"","pose":"","ecran":"","pilier":""}',
   ].join("\n\n");
