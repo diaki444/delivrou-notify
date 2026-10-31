@@ -909,3 +909,201 @@ studioRouter.post("/nettoyer", async (_req, res) => {
   });
   res.json({ ok: true, supprimes: n });
 });
+
+// ---------- videos en histoire : scenario ecrit par Gemini, montage dans le QG ----------
+interface Carte {
+  titre: string;
+  texte: string;
+}
+interface Message {
+  de: "moi" | "autre";
+  texte: string;
+}
+interface Scene {
+  type: "titre" | "chat" | "tel" | "notif" | "avatar" | "cta";
+  dur?: number;
+  fond?: string;
+  haut?: string;
+  lignes?: string[];
+  objets?: string[];
+  sous?: string;
+  voix?: string;
+  contact?: string;
+  messages?: Message[];
+  ecran?: string;
+  legende?: string;
+  titre?: string;
+  heure?: string;
+  cartes?: Carte[];
+  avatar?: string;
+}
+interface Scenario {
+  titre: string;
+  format: "16:9" | "9:16";
+  scenes: Scene[];
+}
+
+const OBJETS = ["obj-colis", "obj-repere", "obj-scooter", "obj-coche", "obj-bouclier", "obj-cloche", "obj-bulle", "obj-cle"];
+const DECORS = ["dec-rue", "dec-marche", "dec-ville", "dec-nuit", "dec-moto", "dec-salon"];
+const PERSOS = ["per-maman", "per-jeune-femme", "per-entrepreneur", "per-livreur2"];
+
+const HISTOIRES: Scenario[] = [
+  {
+    titre: "Le colis de Fatoumata",
+    format: "16:9",
+    scenes: [
+      { type: "avatar", fond: "dec-salon", avatar: "per-maman", haut: "Ta maman t'appelle", lignes: ["Alors, il est où,", "*ton colis ?*"], objets: ["obj-colis"], voix: "Ta maman t'appelle : alors, il est où, ton colis ?" },
+      { type: "titre", fond: "sombre", haut: "Toi, devant ton téléphone…", lignes: ["Et tu *inventes.*"], objets: ["obj-bulle"], voix: "Toi, tu regardes ton téléphone… et tu inventes." },
+      { type: "chat", fond: "sombre", contact: "Maman", messages: [{ de: "autre", texte: "Il est où, ton colis ?" }, { de: "moi", texte: "Il est presque arrivé, maman." }], voix: "« Il est presque arrivé, maman. »" },
+      { type: "titre", fond: "clair", haut: "Sauf que…", lignes: ["« Presque arrivé »,", "ce n'est pas *une adresse.*"], objets: ["obj-repere"], voix: "Sauf que « presque arrivé », ce n'est pas une adresse." },
+      { type: "tel", fond: "sombre", ecran: "09-en-route-code", legende: "Ton livreur, *en direct* sur la carte", objets: ["obj-scooter", "obj-repere"], voix: "Avec Delivrou, tu vois ton livreur en direct, sur la carte." },
+      { type: "notif", fond: "sombre", titre: "Prévenu à chaque étape", cartes: [{ titre: "Livreur assigné", texte: "Il vient chercher ton colis" }, { titre: "Colis en route", texte: "Suis-le sur la carte" }, { titre: "Colis remis", texte: "Remis avec ton code" }], voix: "Tu es prévenu à chaque étape." },
+      { type: "titre", fond: "sombre", haut: "À la remise", lignes: ["Pas de code,", "*pas de colis.*"], objets: ["obj-cle", "obj-bouclier"], voix: "Et à la remise, le livreur te demande ton code. Pas de code, pas de colis." },
+      { type: "titre", fond: "dec-salon", lignes: ["Maman est *contente.*"], sous: "Et toi, tu ne mens plus.", objets: ["obj-coche"], voix: "Résultat : maman est contente, et toi, tu n'as plus besoin de mentir." },
+      { type: "cta", lignes: ["Delivrou.", "Envoie ton colis."], voix: "Delivrou. Envoie ton colis, sans stress." },
+    ],
+  },
+];
+
+const clip = (v: unknown, n: number) => t(v, n).replace(/\s+/g, " ").trim();
+const listeChoisie = (v: unknown, permis: string[], max: number) => (Array.isArray(v) ? v.map(String).filter((x) => permis.includes(x)).slice(0, max) : []);
+
+/** Controle strict d'un scenario (venu de Gemini ou du client) : forme, longueurs, elements de la bibliotheque, regles de marque. */
+function validerScenario(brut: unknown): Scenario | null {
+  if (!brut || typeof brut !== "object") return null;
+  const o = brut as Record<string, unknown>;
+  if (!Array.isArray(o.scenes)) return null;
+  const scenes: Scene[] = [];
+  for (const x of o.scenes.slice(0, 14)) {
+    if (!x || typeof x !== "object") continue;
+    const r = x as Record<string, unknown>;
+    const type = String(r.type);
+    const lignes = Array.isArray(r.lignes) ? r.lignes.slice(0, 3).map((l) => clip(l, 34)).filter(Boolean) : [];
+    const fondBrut = String(r.fond);
+    const base = {
+      fond: ["sombre", "clair", "orange"].includes(fondBrut) || DECORS.includes(fondBrut) ? fondBrut : "sombre",
+      haut: clip(r.haut, 40),
+      sous: clip(r.sous, 60),
+      voix: clip(r.voix, 160),
+      objets: listeChoisie(r.objets, OBJETS, 3),
+    };
+    if (type === "titre" && lignes.length) scenes.push({ type, ...base, lignes });
+    else if (type === "avatar" && lignes.length && PERSOS.includes(String(r.avatar))) scenes.push({ type, ...base, lignes, avatar: String(r.avatar) });
+    else if (type === "chat" && Array.isArray(r.messages)) {
+      const messages = r.messages.slice(0, 4).map((m) => ({ de: (m as Record<string, unknown>)?.de === "moi" ? ("moi" as const) : ("autre" as const), texte: clip((m as Record<string, unknown>)?.texte, 52) })).filter((m) => m.texte);
+      if (messages.length) scenes.push({ type, ...base, contact: clip(r.contact, 16) || "Maman", messages });
+    } else if (type === "tel" && ECRANS.includes(String(r.ecran))) scenes.push({ type, ...base, ecran: String(r.ecran), legende: clip(r.legende, 60) });
+    else if (type === "notif" && Array.isArray(r.cartes)) {
+      const cartes = r.cartes.slice(0, 3).map((c) => ({ titre: clip((c as Record<string, unknown>)?.titre, 28), texte: clip((c as Record<string, unknown>)?.texte, 44) })).filter((c) => c.titre);
+      if (cartes.length) scenes.push({ type, ...base, titre: clip(r.titre, 44), cartes, heure: /^\d{2}:\d{2}$/.test(String(r.heure)) ? String(r.heure) : undefined });
+    } else if (type === "cta") scenes.push({ type, ...base, lignes: lignes.length ? lignes : ["Delivrou.", "Envoie ton colis."] });
+  }
+  if (scenes.length < 4) return null;
+  if (scenes[scenes.length - 1].type !== "cta") scenes.push({ type: "cta", lignes: ["Delivrou.", "Envoie ton colis."] });
+  const textes = JSON.stringify(scenes.map((c) => [c.lignes, c.haut, c.sous, c.voix, c.messages, c.legende, c.titre, c.cartes]));
+  if (verifierRegles(textes).length) return null;
+  return { titre: clip(o.titre, 60) || "Histoire Delivrou", format: o.format === "9:16" ? "9:16" : "16:9", scenes };
+}
+
+const scenariosRecents: number[] = [];
+studioRouter.post("/scenario", async (req: Request, res: Response) => {
+  const j = journal().filter((e) => e.gabarit === "histoire");
+  const defaut = HISTOIRES[j.length % HISTOIRES.length];
+  const sujet = clip((req.body as Record<string, unknown> | undefined)?.sujet, 200);
+  if (!isGeminiConfigured()) {
+    res.json({ ok: true, source: "modele", scenario: defaut });
+    return;
+  }
+  const maintenant = Date.now();
+  while (scenariosRecents.length && maintenant - scenariosRecents[0] > 3_600_000) scenariosRecents.shift();
+  if (scenariosRecents.length >= 20) {
+    res.json({ ok: true, source: "modele", scenario: defaut });
+    return;
+  }
+  scenariosRecents.push(maintenant);
+  const deja = j.slice(-6).map((e) => "- " + e.titre).join("\n") || "(rien)";
+  const consigne = [
+    "Tu écris le scénario d'une vidéo de motion design de 28 à 36 secondes pour Facebook et TikTok, pour Delivrou, service de livraison de COLIS à Conakry. Style : histoire courte et drôle avec un prénom guinéen, une situation que chacun connaît, une chute, puis la solution Delivrou, puis l'appel à l'action. Une voix off lit une phrase par scène : champ voix = la phrase lue (10 à 22 mots, ton complice et amusant, tutoiement, français simple). Pas de personnage qui bouge : seulement du texte animé, des maquettes, des objets 3D et des photos de décor.",
+    "Types de scènes : « titre » (haut = petite ligne grise ≤ 40 caractères ; lignes = 1 à 3 lignes ≤ 34 caractères ; *mot* entre étoiles = mot surligné ; fond = sombre|clair|orange|" + DECORS.join("|") + " ; objets = jusqu'à 3 objets 3D parmi " + OBJETS.join(", ") + " ; sous = sous-titre ≤ 60) ; « avatar » (comme titre, plus avatar parmi " + PERSOS.join(", ") + " : portrait rond) ; « chat » (contact, messages = 2 à 4 {de:moi|autre, texte ≤ 52}) ; « tel » (le téléphone avec la vraie app : ecran parmi " + ECRANS.join(", ") + ", legende ≤ 60, objets) ; « notif » (titre ≤ 44, cartes = 2 ou 3 {titre ≤ 28, texte ≤ 44}, heure facultative au format HH:MM) ; « cta » (dernière scène : lignes = 2 lignes courtes).",
+    "Structure conseillée : accroche en 3 s, le problème, retournement « Sauf que… », la solution avec la vraie app (tel, notif), cta. 8 à 11 scènes. Choisis format 16:9 (par défaut) ou 9:16 si l'histoire s'y prête.",
+    "RÈGLES STRICTES : le seul service est le COLIS (jamais de repas, pharmacie, épicerie) ; aucun délai chiffré ni prix ; aucune promesse de rapidité (jamais « vite », « rapide », « express ») ; aucun chiffre inventé ; pas de paiement en espèces ; aucune fausse urgence ; pas de concours ; rien de religieux ; pas de faux avis ni témoignage (petite histoire imaginée). Affirmations vraies pour l'app uniquement : suivi du livreur en direct sur la carte, notifications à chaque étape, code de livraison remis au livreur, prix affiché avant de valider, livreurs vérifiés.",
+    sujet ? "Sujet demandé : " + sujet : "Choisis un sujet différent des précédents.",
+    "Histoires déjà faites (ne les répète pas) :\n" + deja,
+    'Réponds UNIQUEMENT par un objet JSON valide : {"titre":"","format":"16:9","scenes":[{"type":"titre","fond":"sombre","haut":"","lignes":["",""],"objets":[],"voix":""}]}',
+  ].join("\n\n");
+  const r = await askGeminiEmail(consigne);
+  const brut = r.ok && r.text ? lireObjet(r.text) : null;
+  const valide = brut ? validerScenario(brut) : null;
+  res.json(valide ? { ok: true, source: "gemini", scenario: valide } : { ok: true, source: "modele", scenario: defaut });
+});
+
+studioRouter.post("/video-nouveau", async (req: Request, res: Response) => {
+  const sc = validerScenario((req.body as Record<string, unknown> | undefined)?.scenario);
+  if (!sc) {
+    res.status(422).json({ ok: false, erreur: "Scénario refusé (forme ou règles de marque)." });
+    return;
+  }
+  const id = `${Date.now().toString(36)}-${crypto.randomBytes(2).toString("hex")}`;
+  const refus = await modifierJournal((j) => {
+    if (j.filter((e) => e.statut === "en_cours").length >= 3) return "Trois créations sont déjà en cours.";
+    j.push({
+      id,
+      date: new Date().toISOString(),
+      semaine: lundiDe(),
+      idee: "Vidéo : " + sc.titre,
+      structure: "libre",
+      genre: "photo",
+      titre: sc.titre,
+      sous: "",
+      type: "video",
+      format: "9:16",
+      modele: "montage-qg",
+      prompt: "",
+      cout: 0,
+      mode: "reel",
+      statut: "en_cours",
+      fichier: null,
+      note: null,
+      gabarit: "histoire",
+    });
+    return null;
+  });
+  if (refus) {
+    res.status(429).json({ ok: false, erreur: refus });
+    return;
+  }
+  res.json({ ok: true, id });
+});
+
+studioRouter.post("/video-fichier", express.raw({ type: ["video/mp4", "video/webm"], limit: "80mb" }), async (req: Request, res: Response) => {
+  const id = String(req.query.id || "");
+  const corps = req.body as Buffer;
+  const mp4 = Boolean(req.headers["content-type"]?.startsWith("video/mp4"));
+  const ok = Buffer.isBuffer(corps) && corps.length > 20_000;
+  const trouve = ok
+    ? await modifierJournal((j) => {
+        const e = j.find((x) => x.id === id);
+        if (!e || e.gabarit !== "histoire" || e.statut !== "en_cours") return false;
+        const fichier = `${e.id}.${mp4 ? "mp4" : "webm"}`;
+        fs.mkdirSync(CREATIONS, { recursive: true });
+        fs.writeFileSync(path.join(CREATIONS, fichier), corps);
+        e.fichier = fichier;
+        e.statut = "pret";
+        e.legendes = legendes(e);
+        return true;
+      })
+    : false;
+  res.status(trouve ? 200 : 400).json({ ok: trouve });
+});
+
+studioRouter.post("/video-echec", async (req: Request, res: Response) => {
+  const id = String((req.body as Record<string, unknown> | undefined)?.id || "");
+  await modifierJournal((j) => {
+    const e = j.find((x) => x.id === id && x.gabarit === "histoire" && x.statut === "en_cours");
+    if (e) {
+      e.statut = "echec";
+      e.erreur = "Montage interrompu";
+    }
+  });
+  res.json({ ok: true });
+});
