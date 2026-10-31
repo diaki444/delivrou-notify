@@ -944,6 +944,7 @@ interface Scene {
   avatar?: string;
 }
 interface Scenario {
+  ambiance?: string;
   titre: string;
   format: "16:9" | "9:16";
   scenes: Scene[];
@@ -993,7 +994,7 @@ function validerScenario(brut: unknown): Scenario | null {
   const o = brut as Record<string, unknown>;
   if (!Array.isArray(o.scenes)) return null;
   const scenes: Scene[] = [];
-  for (const x of o.scenes.slice(0, 14)) {
+  for (const x of o.scenes.slice(0, 18)) {
     if (!x || typeof x !== "object") continue;
     const r = x as Record<string, unknown>;
     const type = String(r.type);
@@ -1003,7 +1004,7 @@ function validerScenario(brut: unknown): Scenario | null {
       fond: ["sombre", "clair", "orange"].includes(fondBrut) || decorsDispo().includes(fondBrut) ? fondBrut : "sombre",
       haut: clip(r.haut, 40),
       sous: clip(r.sous, 60),
-      voix: clip(r.voix, 160),
+      voix: clip(r.voix, 240),
       objets: listeChoisie(r.objets, objetsDispo(), 3),
     };
     if (type === "plan") {
@@ -1024,39 +1025,137 @@ function validerScenario(brut: unknown): Scenario | null {
   if (scenes[scenes.length - 1].type !== "cta") scenes.push({ type: "cta", lignes: ["Delivrou.", "Envoie ton colis."] });
   const textes = JSON.stringify(scenes.map((c) => [c.lignes, c.haut, c.sous, c.voix, c.messages, c.legende, c.titre, c.cartes]));
   if (verifierRegles(textes).length) return null;
-  return { titre: clip(o.titre, 60) || "Histoire Delivrou", format: o.format === "9:16" ? "9:16" : "16:9", scenes };
+  return { titre: clip(o.titre, 60) || "Histoire Delivrou", format: o.format === "9:16" ? "9:16" : "16:9", scenes, ambiance: AMBIANCES.includes(String(o.ambiance)) ? String(o.ambiance) : undefined };
 }
 
+const AMBIANCES = ["drole", "enthousiaste", "serieux", "emouvant"];
+const CONSIGNE_AMBIANCE: Record<string, string> = {
+  drole: "AMBIANCE DRÔLE : situation du quotidien, exagération tendre, une vraie chute, un ou deux traits d'esprit. Dans le champ voix, place avec parcimonie (3 à 5 fois en tout) des balises ElevenLabs en anglais entre crochets, juste avant ou au milieu de la phrase qu'elles colorent : [laughs], [chuckles], [sighs], [gasps], [sarcastically]. La voix off rit ou soupire alors vraiment.",
+  enthousiaste: "AMBIANCE ENTHOUSIASTE : énergique, positive, phrases courtes et rythmées, points d'exclamation mesurés. Dans le champ voix, place 2 à 4 balises ElevenLabs entre crochets : [excited], [laughs], [chuckles].",
+  serieux: "AMBIANCE SÉRIEUSE : ton posé, rassurant, factuel, phrases nettes, aucune blague. Aucune balise entre crochets.",
+  emouvant: "AMBIANCE ÉMOUVANTE : chaleureuse et humaine, une petite histoire de proches qui se retrouvent, rythme calme. Dans le champ voix, place 1 à 3 balises ElevenLabs entre crochets : [softly], [sighs], [warmly].",
+};
+const DUREES_VIDEO: Record<number, { mots: string; scenes: string }> = {
+  30: { mots: "70 à 85 mots de voix en tout", scenes: "8 à 10 scènes" },
+  45: { mots: "105 à 125 mots de voix en tout", scenes: "11 à 14 scènes" },
+  60: { mots: "145 à 165 mots de voix en tout", scenes: "14 à 18 scènes" },
+};
+const LECONS_FILE = path.join(STUDIO_DIR, "lecons.json");
+interface Lecon {
+  date: string;
+  texte: string;
+}
+const lecons = () => readJson<Lecon[]>(LECONS_FILE, []);
+function retenirLecon(texte: string) {
+  const l = lecons().filter((x) => x.texte !== texte);
+  l.push({ date: new Date().toISOString(), texte });
+  writeJson(LECONS_FILE, l.slice(-30));
+}
+const blocLecons = () => {
+  const l = lecons().slice(-10);
+  return l.length ? "Retours d'Ibrahima sur les vidéos précédentes (applique-les, ils comptent plus que tes habitudes) :\n" + l.map((x) => "- " + x.texte).join("\n") : "";
+};
+const REGLES_MARQUE =
+  "RÈGLES STRICTES : le seul service est le COLIS (jamais de repas, pharmacie, épicerie) ; aucun délai chiffré ni prix ; aucune promesse de rapidité (jamais « vite », « rapide », « express ») ; aucun chiffre inventé ; pas de paiement en espèces ; aucune fausse urgence ; pas de concours ; rien de religieux ; pas de faux avis ni témoignage (petite histoire imaginée). Affirmations vraies pour l'app uniquement : suivi du livreur en direct sur la carte, notifications à chaque étape, code de livraison remis au livreur, prix affiché avant de valider, livreurs vérifiés.";
+const TYPES_SCENES = () =>
+  "Types de scènes : « titre » (haut = petite ligne grise ≤ 40 caractères ; lignes = 1 à 3 lignes ≤ 34 caractères ; *mot* entre étoiles = mot surligné ; fond = sombre|clair|orange|" + decorsDispo().join("|") + " ; objets = jusqu'à 3 objets 3D parmi " + objetsDispo().join(", ") + " ; sous = sous-titre ≤ 60) ; « avatar » (comme titre, plus avatar parmi " + persosDispo().join(", ") + " : portrait rond) ; « chat » (contact, messages = 2 à 4 {de:moi|autre, texte ≤ 52}) ; « tel » (le téléphone avec la vraie app : ecran parmi " + ECRANS.join(", ") + ", legende ≤ 60, objets) ; « notif » (titre ≤ 44, cartes = 2 ou 3 {titre ≤ 28, texte ≤ 44}, heure facultative au format HH:MM) ; « cta » (dernière scène : lignes = 2 lignes courtes)." + (plansDispo().length ? " Plans animés déjà tournés que tu peux insérer avec « plan » (champ plan = identifiant, lignes facultatives pour un texte par-dessus) : " + plansDispo().map((e) => e.id + " = " + (e.titre || e.idee)).join(" ; ") + "." : "");
+
 const scenariosRecents: number[] = [];
+const limiteGemini = () => {
+  const maintenant = Date.now();
+  while (scenariosRecents.length && maintenant - scenariosRecents[0] > 3_600_000) scenariosRecents.shift();
+  if (scenariosRecents.length >= 30) return true;
+  scenariosRecents.push(maintenant);
+  return false;
+};
+
 studioRouter.post("/scenario", async (req: Request, res: Response) => {
   const j = journal().filter((e) => e.gabarit === "histoire");
   const defaut = HISTOIRES[j.length % HISTOIRES.length];
-  const sujet = clip((req.body as Record<string, unknown> | undefined)?.sujet, 200);
-  if (!isGeminiConfigured()) {
+  const corps = (req.body || {}) as Record<string, unknown>;
+  const sujet = clip(corps.sujet, 200);
+  const ambiance = AMBIANCES.includes(String(corps.ambiance)) ? String(corps.ambiance) : "";
+  const duree = [30, 45, 60].includes(Number(corps.duree)) ? Number(corps.duree) : 30;
+  if (!isGeminiConfigured() || limiteGemini()) {
     res.json({ ok: true, source: "modele", scenario: defaut });
     return;
   }
-  const maintenant = Date.now();
-  while (scenariosRecents.length && maintenant - scenariosRecents[0] > 3_600_000) scenariosRecents.shift();
-  if (scenariosRecents.length >= 20) {
-    res.json({ ok: true, source: "modele", scenario: defaut });
-    return;
-  }
-  scenariosRecents.push(maintenant);
   const deja = j.slice(-6).map((e) => "- " + e.titre).join("\n") || "(rien)";
+  const cible = DUREES_VIDEO[duree];
   const consigne = [
-    "Tu écris le scénario d'une vidéo de motion design de 28 à 36 secondes pour Facebook et TikTok, pour Delivrou, service de livraison de COLIS à Conakry. Style : histoire courte et drôle avec un prénom guinéen, une situation que chacun connaît, une chute, puis la solution Delivrou, puis l'appel à l'action. Une voix off lit une phrase par scène : champ voix = la phrase lue (10 à 22 mots, ton complice et amusant, tutoiement, français simple). Pas de personnage qui bouge : seulement du texte animé, des maquettes, des objets 3D et des photos de décor.",
-    "Types de scènes : « titre » (haut = petite ligne grise ≤ 40 caractères ; lignes = 1 à 3 lignes ≤ 34 caractères ; *mot* entre étoiles = mot surligné ; fond = sombre|clair|orange|" + decorsDispo().join("|") + " ; objets = jusqu'à 3 objets 3D parmi " + objetsDispo().join(", ") + " ; sous = sous-titre ≤ 60) ; « avatar » (comme titre, plus avatar parmi " + persosDispo().join(", ") + " : portrait rond) ; « chat » (contact, messages = 2 à 4 {de:moi|autre, texte ≤ 52}) ; « tel » (le téléphone avec la vraie app : ecran parmi " + ECRANS.join(", ") + ", legende ≤ 60, objets) ; « notif » (titre ≤ 44, cartes = 2 ou 3 {titre ≤ 28, texte ≤ 44}, heure facultative au format HH:MM) ; « cta » (dernière scène : lignes = 2 lignes courtes)." + (plansDispo().length ? " Plans animés déjà tournés que tu peux insérer avec « plan » (champ plan = identifiant, lignes facultatives pour un texte par-dessus) : " + plansDispo().map((e) => e.id + " = " + (e.titre || e.idee)).join(" ; ") + "." : ""),
-    "Structure conseillée : accroche en 3 s, le problème, retournement « Sauf que… », la solution avec la vraie app (tel, notif), cta. 8 à 11 scènes. Choisis format 16:9 (par défaut) ou 9:16 si l'histoire s'y prête.",
-    "RÈGLES STRICTES : le seul service est le COLIS (jamais de repas, pharmacie, épicerie) ; aucun délai chiffré ni prix ; aucune promesse de rapidité (jamais « vite », « rapide », « express ») ; aucun chiffre inventé ; pas de paiement en espèces ; aucune fausse urgence ; pas de concours ; rien de religieux ; pas de faux avis ni témoignage (petite histoire imaginée). Affirmations vraies pour l'app uniquement : suivi du livreur en direct sur la carte, notifications à chaque étape, code de livraison remis au livreur, prix affiché avant de valider, livreurs vérifiés.",
+    "Tu es scénariste et dialoguiste de vidéos courtes pour Facebook et TikTok, spécialiste du ton guinéen : naturel, chaleureux, jamais traduit du français de France. Tu écris pour Delivrou, service de livraison de COLIS à Conakry.",
+    "Mission : le scénario d'une vidéo de motion design de " + duree + " secondes. Une voix off lit une phrase par scène : champ voix = la phrase lue, tutoiement, français simple et parlé, " + cible.mots + " (soit " + cible.scenes + "). Pas de personnage qui bouge : texte animé, maquettes de l'app, objets 3D, portraits et photos de décor.",
+    "Métier : une accroche qui arrête le pouce dans les 3 premières secondes ; UNE situation concrète avec un prénom guinéen et un détail vrai (pas de généralités) ; une montée de tension ; un retournement net ; la solution Delivrou montrée avec la vraie app ; une dernière phrase mémorable puis l'appel à l'action. Varie le rythme des phrases (courtes, une longue). Chaque scène apporte une information nouvelle : pas de remplissage. Les textes à l'écran résument ou renforcent la voix, ils ne la recopient pas mot pour mot.",
+    ambiance ? CONSIGNE_AMBIANCE[ambiance] : "AMBIANCE : choisis celle qui sert le mieux le sujet parmi drôle, enthousiaste, sérieuse, émouvante, et respecte-la jusqu'au bout. Si tu choisis drôle, enthousiaste ou émouvante, place quelques balises ElevenLabs en anglais entre crochets dans le champ voix ([laughs], [chuckles], [sighs], [excited], [softly]), 2 à 5 en tout. Si sérieuse : aucune balise.",
+    TYPES_SCENES(),
+    "Choisis format 16:9 (par défaut) ou 9:16 si l'histoire s'y prête.",
+    REGLES_MARQUE,
     sujet ? "Sujet demandé : " + sujet : "Choisis un sujet différent des précédents.",
     "Histoires déjà faites (ne les répète pas) :\n" + deja,
-    'Réponds UNIQUEMENT par un objet JSON valide : {"titre":"","format":"16:9","scenes":[{"type":"titre","fond":"sombre","haut":"","lignes":["",""],"objets":[],"voix":""}]}',
-  ].join("\n\n");
+    blocLecons(),
+    'Réponds UNIQUEMENT par un objet JSON valide : {"titre":"","ambiance":"drole|enthousiaste|serieux|emouvant","format":"16:9","scenes":[{"type":"titre","fond":"sombre","haut":"","lignes":["",""],"objets":[],"voix":""}]}',
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   const r = await askGeminiEmail(consigne);
   const brut = r.ok && r.text ? lireObjet(r.text) : null;
   const valide = brut ? validerScenario(brut) : null;
+  if (valide && ambiance) valide.ambiance = ambiance;
   res.json(valide ? { ok: true, source: "gemini", scenario: valide } : { ok: true, source: "modele", scenario: defaut });
+});
+
+/** Reecrit UNE scene d'un scenario selon la demande ; les autres restent telles quelles. */
+studioRouter.post("/scenario/modifier", async (req: Request, res: Response) => {
+  const corps = (req.body || {}) as Record<string, unknown>;
+  const sc = validerScenario(corps.scenario);
+  const index = Number(corps.index);
+  const demande = clip(corps.consigne, 240);
+  if (!sc || !Number.isInteger(index) || index < 0 || index >= sc.scenes.length || !demande) {
+    res.status(422).json({ ok: false, erreur: "Demande incomplète." });
+    return;
+  }
+  if (!isGeminiConfigured() || limiteGemini()) {
+    res.status(503).json({ ok: false, erreur: "Gemini n'est pas disponible pour l'instant, réessaie dans un moment." });
+    return;
+  }
+  const ambiance = sc.ambiance ? CONSIGNE_AMBIANCE[sc.ambiance] : "";
+  const resume = sc.scenes.map((x, i) => i + 1 + ". " + JSON.stringify(x)).join("\n");
+  const consigne = [
+    "Tu es scénariste de vidéos courtes de motion design pour Delivrou (livraison de COLIS à Conakry). Voici le scénario actuel « " + sc.titre + " », une scène par ligne :",
+    resume,
+    "Réécris UNIQUEMENT la scène n°" + (index + 1) + " selon cette demande : « " + demande + " ». Garde le fil de l'histoire et la longueur de la voix à peu près égale. Tu peux changer le type de la scène si la demande l'exige (jamais « plan » sauf s'il y en est déjà un). Si c'est la dernière scène, elle reste de type cta.",
+    ambiance,
+    TYPES_SCENES(),
+    REGLES_MARQUE,
+    'Réponds UNIQUEMENT par l\'objet JSON de cette seule scène, par exemple {"type":"titre","fond":"sombre","haut":"","lignes":["",""],"objets":[],"voix":""}.',
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const rep = await askGeminiEmail(consigne);
+  const scene = rep.ok && rep.text ? lireObjet(rep.text) : null;
+  if (!scene) {
+    res.status(502).json({ ok: false, erreur: "Gemini n'a pas répondu, réessaie." });
+    return;
+  }
+  const brutScenes: unknown[] = sc.scenes.slice();
+  brutScenes[index] = scene;
+  const test = validerScenario({ ...sc, scenes: brutScenes });
+  if (!test || test.scenes.length !== sc.scenes.length) {
+    res.status(422).json({ ok: false, erreur: "Cette scène n'est pas valable (règles de marque ou forme). Reformule ta demande." });
+    return;
+  }
+  retenirLecon("Sur une scène « " + sc.scenes[index].type + " » : " + demande);
+  res.json({ ok: true, scene: test.scenes[index] });
+});
+
+studioRouter.post("/scenario/avis", (req: Request, res: Response) => {
+  const texte = clip((req.body as Record<string, unknown> | undefined)?.texte, 200);
+  if (!texte) {
+    res.status(422).json({ ok: false, erreur: "Écris ton retour." });
+    return;
+  }
+  retenirLecon(texte);
+  res.json({ ok: true, total: lecons().length });
 });
 
 studioRouter.post("/video-nouveau", async (req: Request, res: Response) => {
