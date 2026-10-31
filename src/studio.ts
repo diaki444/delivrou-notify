@@ -493,7 +493,7 @@ studioRouter.post("/commande", (req, res) => {
   res.json({ ok: true, prompt: construireCommande(d, journal()), alertes: verifierRegles(d.idee, d.titre, d.sous, d.bouton) });
 });
 
-studioRouter.post("/generer", async (req: Request, res: Response) => {
+async function genererHandler(req: Request, res: Response) {
   const key = hfKey();
   if (!key || disabled()) {
     res.status(503).json({ ok: false, erreur: "Le Studio n'est pas activé sur le serveur (clé Higgsfield absente ou Studio coupé)." });
@@ -582,7 +582,8 @@ studioRouter.post("/generer", async (req: Request, res: Response) => {
   recents.push(maintenant);
   void produire(id, modele, duree);
   res.status(202).json({ ok: true, id });
-});
+}
+studioRouter.post("/generer", genererHandler);
 
 studioRouter.post("/finaliser", express.raw({ type: "image/png", limit: "12mb" }), async (req, res) => {
   const id = String(req.query.id || "");
@@ -780,4 +781,130 @@ studioRouter.post("/idees", async (req: Request, res: Response) => {
     return;
   }
   res.json({ ok: true, idees: liste.slice(0, 4) });
+});
+
+// ---------- creation en un clic : l'idee, les textes et la pose sont choisis automatiquement ----------
+interface Brief {
+  t1: string;
+  t2: string;
+  sous: string;
+  pastille: string;
+  pose: string;
+  ecran: string;
+  pilier: string;
+}
+const BRIEFS: Brief[] = [
+  { t1: "Ton colis,", t2: "suivi en direct", sous: "Envoie ton colis à Conakry et suis-le sur ton téléphone.", pastille: "Suivi en direct", pose: "montre", ecran: "09-en-route-code", pilier: "Comment ça marche" },
+  { t1: "Envoie un colis,", t2: "sans stress", sous: "Le prix s'affiche avant que tu valides.", pastille: "Prix affiché", pose: "pouce", ecran: "01-accueil", pilier: "Confiance" },
+  { t1: "Le code qui", t2: "protège ton colis", sous: "Le livreur ne remet le colis qu'avec ton code.", pastille: "Code de livraison", pose: "pointe", ecran: "09-en-route-code", pilier: "Confiance" },
+  { t1: "Ton livreur,", t2: "tu le vois venir", sous: "Suis-le en direct sur la carte jusqu'à destination.", pastille: "Carte en direct", pose: "rit", ecran: "08-livreur-assigne-pin", pilier: "Comment ça marche" },
+];
+const ECRANS = ["01-accueil", "09-en-route-code", "08-livreur-assigne-pin", "10-remis"];
+
+function lireObjet(texte: string): Record<string, unknown> | null {
+  const brut = texte.replace(/```(?:json)?/gi, "").trim();
+  const a = brut.indexOf("{");
+  const z = brut.lastIndexOf("}");
+  if (a < 0 || z <= a) return null;
+  try {
+    const o: unknown = JSON.parse(brut.slice(a, z + 1));
+    return o && typeof o === "object" ? (o as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function briefAffiche(): Promise<Brief> {
+  const j = journal().filter((e) => e.gabarit);
+  const fallback = BRIEFS[j.length % BRIEFS.length];
+  if (!isGeminiConfigured()) return fallback;
+  const deja = j.slice(-8).map((e) => "- " + (e.titre || "").replace("|", " ")).join("\n") || "(rien)";
+  const consigne = [
+    "Tu es le directeur artistique de Delivrou, service de livraison de COLIS à Conakry. Invente UNE affiche pour Facebook et TikTok.",
+    "Champs : t1 et t2 = les deux lignes du titre (chacune 16 caractères maximum, espaces compris, sans point final) ; sous = une phrase d'appui de 60 caractères maximum ; pastille = 2 ou 3 mots (18 caractères maximum) pour une pastille ronde ; pose parmi montre, pointe, pouce, rit ; ecran parmi " + ECRANS.join(", ") + " (l'écran de l'app le plus adapté) ; pilier parmi " + PILIERS.map((p) => "« " + p + " »").join(", ") + ".",
+    "RÈGLES STRICTES : le seul service est le COLIS (jamais de repas, pharmacie, épicerie) ; aucun délai chiffré ni prix ; aucun chiffre inventé ; pas de paiement en espèces ; aucune fausse urgence ; pas de concours ; rien de religieux ; pas de faux avis. Tutoiement, français simple et chaleureux. Les affirmations doivent être vraies pour l'app : suivi en direct du livreur sur la carte, code de livraison à donner au livreur, prix affiché avant de valider, livreurs vérifiés.",
+    "Titres déjà faits (ne les répète pas) :\n" + deja,
+    'Réponds UNIQUEMENT par un objet JSON valide : {"t1":"","t2":"","sous":"","pastille":"","pose":"","ecran":"","pilier":""}',
+  ].join("\n\n");
+  const r = await askGeminiEmail(consigne);
+  const o = r.ok && r.text ? lireObjet(r.text) : null;
+  if (!o) return fallback;
+  const b: Brief = {
+    t1: t(o.t1, 40).trim(),
+    t2: t(o.t2, 40).trim(),
+    sous: t(o.sous, 100).trim(),
+    pastille: t(o.pastille, 30).trim(),
+    pose: Object.keys(POSES).includes(String(o.pose)) ? String(o.pose) : fallback.pose,
+    ecran: ECRANS.includes(String(o.ecran)) ? String(o.ecran) : fallback.ecran,
+    pilier: PILIERS.includes(String(o.pilier)) ? String(o.pilier) : fallback.pilier,
+  };
+  const trop = b.t1.length < 2 || b.t1.length > 16 || b.t2.length < 2 || b.t2.length > 18 || b.sous.length > 70 || b.pastille.length < 2 || b.pastille.length > 20;
+  if (trop || verifierRegles(b.t1, b.t2, b.sous, b.pastille).length) return fallback;
+  return b;
+}
+
+async function ideePhoto(): Promise<string> {
+  const defaut = "Une jeune femme guinéenne sourit en recevant un colis à sa porte, lumière chaude de fin d'après-midi, rue de Conakry floue en arrière-plan.";
+  if (!isGeminiConfigured()) return defaut;
+  const r = await askGeminiEmail(consigneIdees("photo", "image", "", "", 1));
+  const brut = r.ok && r.text ? lireJson(r.text) : null;
+  const premiere = Array.isArray(brut) ? (brut[0] as Record<string, unknown> | undefined) : undefined;
+  const idee = premiere ? t(premiere.idee, 600).trim() : "";
+  return idee && !verifierRegles(idee).length ? idee : defaut;
+}
+
+studioRouter.post("/auto", async (req: Request, res: Response) => {
+  const type = (req.body as Record<string, unknown> | undefined)?.type;
+  if (type === "affiche") {
+    const b = await briefAffiche();
+    req.body = { gabarit: "delivrou-a", persona: "homme", pose: b.pose, titre: b.t1 + "|" + b.t2, sous: b.sous, pastille: b.pastille, ecran: b.ecran, pilier: b.pilier, idee: "Affiche : " + b.t1 + " " + b.t2 };
+  } else if (type === "photo") {
+    const idee = await ideePhoto();
+    const prompt = construireCommande({ idee, type: "image", genre: "photo", format: "4:5", structure: "libre", titre: "", sous: "", bouton: "" }, journal());
+    req.body = { genre: "photo", type: "image", modele: "auto", format: "4:5", structure: "libre", idee, prompt };
+  } else {
+    res.status(400).json({ ok: false, erreur: "Type inconnu." });
+    return;
+  }
+  await genererHandler(req, res);
+});
+
+// ---------- suppression ----------
+function effacer(e: Entree) {
+  for (const f of [e.fichier, e.original]) {
+    if (!f) continue;
+    try {
+      fs.unlinkSync(path.join(CREATIONS, path.basename(f)));
+    } catch {
+      /* fichier deja absent */
+    }
+  }
+}
+studioRouter.post("/supprimer", async (req, res) => {
+  const id = String((req.body as Record<string, unknown> | undefined)?.id || "");
+  if (planning().some((p) => p.id === id)) {
+    res.status(409).json({ ok: false, erreur: "Elle est au calendrier : retire-la d'abord du calendrier." });
+    return;
+  }
+  const ok = await modifierJournal((j) => {
+    const i = j.findIndex((x) => x.id === id);
+    if (i < 0 || j[i].statut === "en_cours") return false;
+    effacer(j[i]);
+    j.splice(i, 1);
+    return true;
+  });
+  res.status(ok ? 200 : 404).json({ ok });
+});
+studioRouter.post("/nettoyer", async (_req, res) => {
+  const n = await modifierJournal((j) => {
+    const avant = j.length;
+    for (let i = j.length - 1; i >= 0; i--) {
+      if (j[i].statut === "echec") {
+        effacer(j[i]);
+        j.splice(i, 1);
+      }
+    }
+    return avant - j.length;
+  });
+  res.json({ ok: true, supprimes: n });
 });
