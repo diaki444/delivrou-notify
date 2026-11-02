@@ -91,6 +91,9 @@ interface Entree {
   duree?: number;
   pastille?: string;
   ecran?: string;
+  persona?: string;
+  pose?: string;
+  angle?: string;
   legendes?: Legendes;
 }
 interface PostPlanifie {
@@ -317,12 +320,22 @@ interface Demande {
 const PERSONNAGES: Record<string, { desc: string; tenue: string }> = {
   homme: { desc: "a real young Guinean man in his late twenties, short hair, light stubble", tenue: "a plain bright orange crew-neck t-shirt" },
   femme: { desc: "a real young Guinean woman in her late twenties, natural hair, elegant", tenue: "a plain bright orange blouse with a small colourful wax-print scarf" },
+  maman: { desc: "a real Guinean mother in her forties, warm kind face, elegant", tenue: "a plain bright orange blouse with a plain cream headscarf" },
+  etudiante: { desc: "a real young Guinean female student in her early twenties, braids, bright smile", tenue: "a plain bright orange hoodie" },
+  papa: { desc: "a real Guinean father in his late thirties, short neat beard, friendly", tenue: "a plain bright orange polo shirt" },
+  commercant: { desc: "a real Guinean shopkeeper in his fifties, grey-flecked beard, kind eyes", tenue: "a plain bright orange short-sleeve shirt" },
+  aine: { desc: "a real elderly Guinean grandfather in his sixties, short white beard, warm smile", tenue: "a plain bright orange shirt" },
+  livreuse: { desc: "a real young Guinean woman courier in her mid twenties, athletic", tenue: "a plain bright orange zip jacket and a plain black helmet worn on the head" },
   livreur: { desc: "a real young Guinean delivery courier in his early twenties, athletic", tenue: "a plain bright orange zip jacket and a plain black helmet worn on the head" },
 };
 const POSES: Record<string, string> = {
   montre: "his or her right hand held out open to the side, palm up, presenting something off-frame, big warm smile, body slightly turned",
   pointe: "one arm extended with the index finger clearly pointing to the side, the other hand relaxed, excited smile",
   pouce: "one hand giving a confident thumbs up, the other relaxed, big smile",
+  croise: "arms crossed confidently on the chest, relaxed proud smile, body slightly turned",
+  salue: "one hand raised waving hello, friendly smile, the other hand relaxed",
+  accueil: "both hands open at waist height in a welcoming gesture, warm smile",
+  hanches: "hands on hips, confident stance, bright smile, head slightly tilted",
   rit: "laughing joyfully, both hands clasped near the chest, body slightly turned, head tilted",
 };
 function commandePersonnage(persona: string, pose: string): string {
@@ -592,6 +605,9 @@ async function genererHandler(req: Request, res: Response) {
       gabarit: gabarit || undefined,
       pastille: gabarit === "delivrou-a" ? t(b.pastille, 30) : undefined,
       ecran: gabarit === "delivrou-a" ? t(b.ecran, 30).replace(/[^a-z0-9-]/gi, "") : undefined,
+      persona: gabarit === "delivrou-a" ? t(b.persona, 12) || undefined : undefined,
+      pose: gabarit === "delivrou-a" ? t(b.pose, 12) || undefined : undefined,
+      angle: t(b.angle, 80) || undefined,
       nom: gabarit === "biblio" ? t(b.nom, 40).replace(/[^a-z0-9-]/gi, "") : undefined,
       duree: type === "video" ? duree : undefined,
       type,
@@ -870,7 +886,74 @@ interface Brief {
   ecran: string;
   pilier: string;
 }
+// ---------- variete : ne jamais refaire deux fois la meme creation ----------
+const ANGLES = [
+  "le code de livraison qui protège le colis",
+  "un point de repère suffit à Conakry, pas besoin d'adresse postale",
+  "la photo du colis comme preuve en cas de dommage",
+  "envoyer un cadeau à la famille",
+  "suivre son livreur en direct sur la carte",
+  "payer avec Orange Money ou MTN MoMo dans l'app",
+  "un coursier vérifié avec photo d'identité",
+  "le prix affiché avant de valider",
+  "noter son livreur après la livraison",
+  "parrainer un ami et gagner des Deli-points",
+  "le bouton Me localiser",
+  "bien emballer son colis",
+  "annuler pendant quelques minutes après la commande",
+  "envoyer un colis pendant qu'on travaille",
+  "les embouteillages de Conakry : toi tu restes tranquille",
+] as const;
+const LIEUX_PHOTO = [
+  "devant une boutique du marché de Madina",
+  "sur la Corniche de Conakry au coucher du soleil",
+  "dans une cour familiale à Ratoma",
+  "sur le seuil d'une maison à Kaloum",
+  "devant un salon de coiffure du quartier",
+  "dans un bureau lumineux du centre-ville",
+  "à un arrêt de taxi collectif animé",
+  "sur une terrasse avec vue sur la ville",
+] as const;
+const PERSONNES_PHOTO = ["une mère de famille", "un étudiant", "un jeune commerçant", "une coiffeuse", "un couple", "un grand-père et sa petite-fille", "un livreur à moto", "une jeune entrepreneuse"];
+const MOMENTS_PHOTO = ["matin lumineux", "midi plein soleil", "fin d'après-midi dorée", "début de soirée"];
+const CADRAGES_PHOTO = ["plan serré sur les mains et le colis", "plan taille", "légère contre-plongée", "plan large avec la rue en arrière-plan"];
+const PRENOMS = ["Mamadou", "Fatoumata", "Aïssatou", "Ibrahima", "Mariama", "Sékou", "Kadiatou", "Hawa", "Ousmane", "Binta", "Boubacar", "Djenabou", "Thierno", "Nenette"];
+const aleatoire = <T,>(arr: readonly T[]): T => arr[crypto.randomInt(arr.length)];
+/** Tire au hasard parmi les elements les moins utilises dans les creations recentes. */
+function tirerPeuUtilise<T extends string>(pool: readonly T[], recents: Array<string | undefined>): T {
+  const compte = new Map<string, number>(pool.map((p) => [p, 0]));
+  for (const r of recents) if (r && compte.has(r)) compte.set(r, (compte.get(r) || 0) + 1);
+  const min = Math.min(...compte.values());
+  return aleatoire(pool.filter((p) => compte.get(p) === min));
+}
+const MOTS_VIDES = new Set(["colis", "delivrou", "envoie", "tes", "pour", "avec", "dans", "sans", "tout", "plus", "conakry"]);
+const motsDe = (txt: string) =>
+  new Set(
+    txt
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9 ]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length > 3 && !MOTS_VIDES.has(w)),
+  );
+/** Vrai si deux textes disent presque la meme chose (la moitie des mots utiles en commun). */
+function tropProche(a: string, b: string): boolean {
+  const A = motsDe(a);
+  const B = motsDe(b);
+  if (!A.size || !B.size) return false;
+  let c = 0;
+  for (const w of A) if (B.has(w)) c++;
+  return c / Math.min(A.size, B.size) >= 0.5;
+}
+
 const BRIEFS: Brief[] = [
+  { t1: "Un repère,", t2: "ça suffit", sous: "Pas d'adresse ? Décris un lieu connu, ou touche Me localiser.", pastille: "Me localiser", pose: "pointe", ecran: "01-accueil", pilier: "Vie de Conakry" },
+  { t1: "Un cadeau", t2: "pour la famille", sous: "Envoie ton colis à Conakry sans te déplacer.", pastille: "Colis famille", pose: "rit", ecran: "10-remis", pilier: "Vie de Conakry" },
+  { t1: "Photo du colis,", t2: "preuve gardée", sous: "Une photo avant l'envoi te protège en cas de dommage.", pastille: "Photo preuve", pose: "montre", ecran: "01-accueil", pilier: "Astuces" },
+  { t1: "Paie en", t2: "mobile money", sous: "Orange Money ou MTN MoMo, directement dans l'app.", pastille: "Orange · MoMo", pose: "pouce", ecran: "01-accueil", pilier: "Comment ça marche" },
+  { t1: "Un livreur", t2: "vérifié", sous: "Chaque coursier a une photo d'identité vérifiée.", pastille: "Coursier vérifié", pose: "pouce", ecran: "08-livreur-assigne-pin", pilier: "Confiance" },
+  { t1: "Parraine,", t2: "gagne des points", sous: "50 Deli-points par parrainage, soit 5 000 GNF.", pastille: "Deli-points", pose: "rit", ecran: "01-accueil", pilier: "Appel à l'action" },
   { t1: "Ton colis,", t2: "suivi en direct", sous: "Envoie ton colis à Conakry et suis-le sur ton téléphone.", pastille: "Suivi en direct", pose: "montre", ecran: "09-en-route-code", pilier: "Comment ça marche" },
   { t1: "Envoie un colis,", t2: "sans stress", sous: "Le prix s'affiche avant que tu valides.", pastille: "Prix affiché", pose: "pouce", ecran: "01-accueil", pilier: "Confiance" },
   { t1: "Le code qui", t2: "protège ton colis", sous: "Le livreur ne remet le colis qu'avec ton code.", pastille: "Code de livraison", pose: "pointe", ecran: "09-en-route-code", pilier: "Confiance" },
@@ -891,16 +974,20 @@ function lireObjet(texte: string): Record<string, unknown> | null {
   }
 }
 
-async function briefAffiche(): Promise<Brief> {
+async function briefAffiche(angle: string): Promise<Brief> {
   const j = journal().filter((e) => e.gabarit);
-  const fallback = BRIEFS[j.length % BRIEFS.length];
+  const textes = j.slice(-20).map((e) => (e.titre || "").replace("|", " ") + " " + (e.sous || ""));
+  const neuf = (b: Brief) => !textes.some((x) => tropProche(x, b.t1 + " " + b.t2 + " " + b.sous));
+  const libres = BRIEFS.filter(neuf);
+  const fallback = aleatoire(libres.length ? libres : BRIEFS);
   if (!isGeminiConfigured()) return fallback;
-  const deja = j.slice(-8).map((e) => "- " + (e.titre || "").replace("|", " ")).join("\n") || "(rien)";
+  const deja = j.slice(-20).map((e) => "- " + (e.titre || "").replace("|", " ") + " / " + (e.sous || "")).join("\n") || "(rien)";
   const consigne = [
     "Tu es le directeur artistique de Delivrou, service de livraison de COLIS à Conakry. Invente UNE affiche pour Facebook et TikTok.",
     "Champs : t1 et t2 = les deux lignes du titre (chacune 16 caractères maximum, espaces compris, sans point final) ; sous = une phrase d'appui de 60 caractères maximum ; pastille = 2 ou 3 mots (18 caractères maximum) pour une pastille ronde ; pose parmi montre, pointe, pouce, rit ; ecran parmi " + ECRANS.join(", ") + " (l'écran de l'app le plus adapté) ; pilier parmi " + PILIERS.map((p) => "« " + p + " »").join(", ") + ".",
     "RÈGLES STRICTES : le seul service est le COLIS (jamais de repas, pharmacie, épicerie) ; aucun délai chiffré ni prix ; aucune promesse de rapidité (jamais « vite », « rapide », « express ») ; aucun chiffre inventé ; pas de paiement en espèces ; aucune fausse urgence ; pas de concours ; rien de religieux ; pas de faux avis. Tutoiement, français simple et chaleureux. Les affirmations doivent être vraies pour l'app : suivi en direct du livreur sur la carte, code de livraison à donner au livreur, prix affiché avant de valider, livreurs vérifiés.",
-    "Titres déjà faits (ne les répète pas) :\n" + deja,
+    "SUJET IMPOSÉ de cette affiche : " + angle + ". Le titre, la phrase d'appui et la pastille doivent parler de CE sujet, avec des mots nouveaux.",
+    "Titres déjà faits (ne répète ni les mots ni l'idée, trouve une autre accroche) :\n" + deja,
     'Réponds UNIQUEMENT par un objet JSON valide : {"t1":"","t2":"","sous":"","pastille":"","pose":"","ecran":"","pilier":""}',
   ].join("\n\n");
   const r = await askGeminiEmail(consigne);
@@ -916,14 +1003,16 @@ async function briefAffiche(): Promise<Brief> {
     pilier: PILIERS.includes(String(o.pilier)) ? String(o.pilier) : fallback.pilier,
   };
   const trop = b.t1.length < 2 || b.t1.length > 16 || b.t2.length < 2 || b.t2.length > 18 || b.sous.length > 70 || b.pastille.length < 2 || b.pastille.length > 20;
-  if (trop || verifierRegles(b.t1, b.t2, b.sous, b.pastille).length) return fallback;
+  if (trop || verifierRegles(b.t1, b.t2, b.sous, b.pastille).length || !neuf(b)) return fallback;
   return b;
 }
 
-async function ideePhoto(): Promise<string> {
-  const defaut = "Une jeune femme guinéenne sourit en recevant un colis à sa porte, lumière chaude de fin d'après-midi, rue de Conakry floue en arrière-plan.";
+async function ideePhoto(lieu: string): Promise<string> {
+  const personne = aleatoire(PERSONNES_PHOTO);
+  const defaut = `${personne.charAt(0).toUpperCase() + personne.slice(1)} sourit en recevant un colis, ${lieu}, ${aleatoire(MOMENTS_PHOTO)}, ${aleatoire(CADRAGES_PHOTO)}.`;
   if (!isGeminiConfigured()) return defaut;
-  const r = await askGeminiEmail(consigneIdees("photo", "image", "", "", 1));
+  const imposes = `Contraintes OBLIGATOIRES de cette photo : lieu = ${lieu} ; personnage = ${personne} ; moment = ${aleatoire(MOMENTS_PHOTO)} ; cadrage = ${aleatoire(CADRAGES_PHOTO)}. Une scène tout à fait différente des créations récentes.`;
+  const r = await askGeminiEmail(consigneIdees("photo", "image", imposes, "", 1));
   const brut = r.ok && r.text ? lireJson(r.text) : null;
   const premiere = Array.isArray(brut) ? (brut[0] as Record<string, unknown> | undefined) : undefined;
   const idee = premiere ? t(premiere.idee, 600).trim() : "";
@@ -933,12 +1022,19 @@ async function ideePhoto(): Promise<string> {
 studioRouter.post("/auto", async (req: Request, res: Response) => {
   const type = (req.body as Record<string, unknown> | undefined)?.type;
   if (type === "affiche") {
-    const b = await briefAffiche();
-    req.body = { gabarit: "delivrou-a", persona: "homme", pose: b.pose, titre: b.t1 + "|" + b.t2, sous: b.sous, pastille: b.pastille, ecran: b.ecran, pilier: b.pilier, idee: "Affiche : " + b.t1 + " " + b.t2 };
+    const recents = journal().filter((e) => e.gabarit === "delivrou-a").slice(-10);
+    const angle = tirerPeuUtilise(ANGLES, recents.map((e) => e.angle));
+    const b = await briefAffiche(angle);
+    // Personnage, pose et ecran sont tires au sort parmi les moins utilises : jamais la meme affiche deux fois de suite.
+    const persona = tirerPeuUtilise(Object.keys(PERSONNAGES), recents.map((e) => e.persona));
+    const pose = tirerPeuUtilise(Object.keys(POSES), recents.map((e) => e.pose));
+    const ecran = tirerPeuUtilise(ECRANS, recents.map((e) => e.ecran));
+    req.body = { gabarit: "delivrou-a", persona, pose, titre: b.t1 + "|" + b.t2, sous: b.sous, pastille: b.pastille, ecran, pilier: b.pilier, angle, idee: "Affiche : " + b.t1 + " " + b.t2 };
   } else if (type === "photo") {
-    const idee = await ideePhoto();
+    const lieu = tirerPeuUtilise(LIEUX_PHOTO, journal().slice(-10).map((e) => e.angle));
+    const idee = await ideePhoto(lieu);
     const prompt = construireCommande({ idee, type: "image", genre: "photo", format: "4:5", structure: "libre", titre: "", sous: "", bouton: "" }, journal());
-    req.body = { genre: "photo", type: "image", modele: "auto", format: "4:5", structure: "libre", idee, prompt };
+    req.body = { genre: "photo", type: "image", modele: "auto", format: "4:5", structure: "libre", idee, prompt, angle: lieu };
   } else {
     res.status(400).json({ ok: false, erreur: "Type inconnu." });
     return;
@@ -1143,16 +1239,19 @@ const limiteGemini = () => {
 
 studioRouter.post("/scenario", async (req: Request, res: Response) => {
   const j = journal().filter((e) => e.gabarit === "histoire");
-  const defaut = HISTOIRES[j.length % HISTOIRES.length];
+  const nouvelles = HISTOIRES.filter((h) => !j.some((e) => e.titre === h.titre));
+  const defaut = aleatoire(nouvelles.length ? nouvelles : HISTOIRES);
   const corps = (req.body || {}) as Record<string, unknown>;
   const sujet = clip(corps.sujet, 200);
-  const ambiance = AMBIANCES.includes(String(corps.ambiance)) ? String(corps.ambiance) : "";
+  const ambiance = AMBIANCES.includes(String(corps.ambiance)) ? String(corps.ambiance) : aleatoire(AMBIANCES);
+  const angleAuto = aleatoire(ANGLES);
+  const cadre = `Cadre imposé pour varier : sujet = ${angleAuto} ; lieu = ${aleatoire(LIEUX_PHOTO)} ; personnage principal prénommé ${aleatoire(PRENOMS)}.`;
   const duree = [30, 45, 60].includes(Number(corps.duree)) ? Number(corps.duree) : 30;
   if (!isGeminiConfigured() || limiteGemini()) {
     res.json({ ok: true, source: "modele", scenario: defaut });
     return;
   }
-  const deja = j.slice(-6).map((e) => "- " + e.titre).join("\n") || "(rien)";
+  const deja = j.slice(-15).map((e) => "- " + e.titre).join("\n") || "(rien)";
   const cible = DUREES_VIDEO[duree];
   const consigne = [
     "Tu es scénariste et dialoguiste de vidéos courtes pour Facebook et TikTok, spécialiste du ton guinéen : naturel, chaleureux, jamais traduit du français de France. Tu écris pour Delivrou, service de livraison de COLIS à Conakry.",
@@ -1162,7 +1261,7 @@ studioRouter.post("/scenario", async (req: Request, res: Response) => {
     TYPES_SCENES(),
     "Choisis format 16:9 (par défaut) ou 9:16 si l'histoire s'y prête.",
     REGLES_MARQUE,
-    sujet ? "Sujet demandé : " + sujet : "Choisis un sujet différent des précédents.",
+    sujet ? "Sujet demandé : " + sujet : cadre,
     "Histoires déjà faites (ne les répète pas) :\n" + deja,
     blocLecons(),
     'Réponds UNIQUEMENT par un objet JSON valide : {"titre":"","ambiance":"drole|enthousiaste|serieux|emouvant","format":"16:9","scenes":[{"type":"titre","fond":"sombre","haut":"","lignes":["",""],"objets":[],"voix":""}]}',
