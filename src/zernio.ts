@@ -202,7 +202,7 @@ let writeBase: string | null = null;
  * reponse (400, 409, 422...) est definitive et renvoyee telle quelle, pour
  * ne jamais envoyer deux fois une ecriture.
  */
-export async function zernioRequest<T>(method: "GET" | "POST", path: string, body?: unknown, headers?: Record<string, string>): Promise<ZernioResult<T>> {
+export async function zernioRequest<T>(method: "GET" | "POST" | "DELETE", path: string, body?: unknown, headers?: Record<string, string>): Promise<ZernioResult<T>> {
   if (!API_KEY) return { ok: false, error: "ZERNIO_API_KEY non configuree sur le serveur." };
   const bases = writeBase ? [writeBase, ...BASES.filter((b) => b !== writeBase)] : BASES;
   let lastError = "Aucune base Zernio n'a repondu.";

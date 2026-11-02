@@ -56,16 +56,10 @@ function resoudreFichier(rel: string): string | null {
   return fs.existsSync(full) && fs.statSync(full).isFile() ? full : null;
 }
 
-/** Fichiers deja envoyes a Zernio (meme fichier non modifie = meme adresse). */
-const televerses = new Map<string, string>();
-
 async function televerser(full: string): Promise<{ ok: true; url: string; mime: string } | { ok: false; erreur: string }> {
   const mime = MIME[path.extname(full).toLowerCase()];
   if (!mime) return { ok: false, erreur: `Format non pris en charge : ${path.extname(full)}` };
   const st = fs.statSync(full);
-  const cle = `${full}:${st.size}:${st.mtimeMs}`;
-  const deja = televerses.get(cle);
-  if (deja) return { ok: true, url: deja, mime };
 
   const pre = await zernioRequest<{ uploadUrl?: string; publicUrl?: string }>("POST", "/v1/media/presign", { filename: path.basename(full), contentType: mime, size: st.size });
   if (!pre.ok) return { ok: false, erreur: pre.error };
@@ -82,7 +76,6 @@ async function televerser(full: string): Promise<{ ok: true; url: string; mime: 
   } finally {
     clearTimeout(timer);
   }
-  televerses.set(cle, publicUrl);
   return { ok: true, url: publicUrl, mime };
 }
 
@@ -105,11 +98,30 @@ export function verifierDemande(d: DemandeProgrammation, maintenant = Date.now()
   return null;
 }
 
+/**
+ * Modifier une programmation = supprimer l'ancienne chez Zernio puis recreer.
+ * Un post deja publie ne peut pas etre supprime : on le laisse, et le nouveau
+ * est cree avec un nouveau fichier envoye, donc sans conflit de doublon.
+ */
+async function supprimerAnciens(qgId: string, reseau: Reseau): Promise<string | null> {
+  const l = await lister();
+  if (!l.ok) return l.erreur;
+  for (const p of l.posts) {
+    if (p.qgId !== qgId || p.reseau !== reseau || !p.id || p.statutPost === "published") continue;
+    const r = await zernioRequest("DELETE", `/v1/posts/${encodeURIComponent(p.id)}`);
+    if (!r.ok) return r.error;
+  }
+  return null;
+}
+
 async function programmerUn(d: DemandeProgrammation, reseau: Reseau): Promise<ResultatReseau> {
   const plateforme = PLATEFORME[reseau];
   const rel = reseau === "tt" ? d.tiktokFile || d.facebookFile : d.facebookFile;
   const full = rel ? resoudreFichier(rel) : null;
   if (!full) return { reseau, ok: false, erreur: "Fichier du post introuvable sur le serveur." };
+
+  const nettoyage = await supprimerAnciens(d.id, reseau);
+  if (nettoyage) return { reseau, ok: false, erreur: "Impossible de remplacer l'ancienne programmation : " + nettoyage };
 
   const compte = await trouverCompte(plateforme);
   if (!compte.ok) return { reseau, ok: false, erreur: compte.erreur };
@@ -146,6 +158,8 @@ export async function programmer(d: DemandeProgrammation): Promise<ResultatResea
 }
 
 export interface PostProgramme {
+  id: string;
+  statutPost: string;
   qgId: string;
   reseau: string;
   statut: string;
@@ -164,6 +178,8 @@ export async function lister(): Promise<{ ok: true; posts: PostProgramme[] } | {
     if (typeof meta.qgId !== "string") continue;
     const plat = Array.isArray(p.platforms) ? (p.platforms[0] as Record<string, unknown> | undefined) : undefined;
     posts.push({
+      id: String(p._id ?? ""),
+      statutPost: String(p.status ?? ""),
       qgId: meta.qgId,
       reseau: String(meta.qgReseau ?? ""),
       statut: String(plat?.status ?? p.status ?? ""),
