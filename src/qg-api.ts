@@ -56,6 +56,7 @@ import {
   draftReply,
   sendReply as sendMailReply,
 } from "./email.js";
+import { commentairesRouter } from "./qg-commentaires.js";
 import { programmer, lister, verifierDemande, type DemandeProgrammation } from "./zernio-publish.js";
 import { otpSecuritySummary } from "./otp.js";
 import { responseStats, pendingChats } from "./metrics.js";
@@ -450,3 +451,6 @@ qgApiRouter.get("/programmer", async (_req, res) => {
   const r = await lister();
   res.status(r.ok ? 200 : 502).json(r.ok ? { ok: true, posts: r.posts } : { ok: false, error: r.erreur });
 });
+
+/** Commentaires Facebook et TikTok : lire, proposer une reponse, envoyer apres validation. */
+qgApiRouter.use("/commentaires", commentairesRouter);
