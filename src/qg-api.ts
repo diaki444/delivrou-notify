@@ -56,6 +56,7 @@ import {
   draftReply,
   sendReply as sendMailReply,
 } from "./email.js";
+import { programmer, lister, verifierDemande, type DemandeProgrammation } from "./zernio-publish.js";
 import { otpSecuritySummary } from "./otp.js";
 import { responseStats, pendingChats } from "./metrics.js";
 import { addProspects, listChats as listChatsForCount, isChatUnread as unread } from "./store.js";
@@ -412,4 +413,40 @@ qgApiRouter.post("/emails/class", (req, res) => {
 
 qgApiRouter.post("/emails/archive", (req, res) => {
   res.json({ ok: archiveThread(String(req.body?.key || "")) });
+});
+
+/** Programme un post du calendrier sur Facebook et/ou TikTok, via Zernio. */
+qgApiRouter.post("/programmer", async (req, res) => {
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  const d: DemandeProgrammation = {
+    id: str(b.id),
+    date: str(b.date),
+    heure: str(b.heure),
+    reseaux: Array.isArray(b.reseaux) ? (b.reseaux as DemandeProgrammation["reseaux"]) : [],
+    type: b.type === "video" ? "video" : "image",
+    facebookFile: str(b.facebookFile) || null,
+    tiktokFile: str(b.tiktokFile) || null,
+    facebook: str(b.facebook),
+    tiktok: str(b.tiktok),
+    tiktokMode: b.tiktokMode === "direct" ? "direct" : "brouillon",
+  };
+  if (!d.id) {
+    res.status(400).json({ ok: false, error: "Post inconnu" });
+    return;
+  }
+  const err = verifierDemande(d);
+  if (err) {
+    res.status(400).json({ ok: false, error: err });
+    return;
+  }
+  const resultats = await programmer(d);
+  res.status(resultats.every((r) => r.ok) ? 200 : 502).json({ ok: resultats.every((r) => r.ok), resultats });
+});
+
+/** Etat reel (programme, publie, echec) des posts envoyes depuis le QG. */
+qgApiRouter.get("/programmer", async (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  const r = await lister();
+  res.status(r.ok ? 200 : 502).json(r.ok ? { ok: true, posts: r.posts } : { ok: false, error: r.erreur });
 });
