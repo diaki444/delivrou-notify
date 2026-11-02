@@ -406,6 +406,7 @@ function construireCommande(d: Demande, j: Entree[]): string {
       DIRECTIONS[choix](ligne1, ligne2, d.sous, personne),
       manuelle && `Concept: ${d.idee}.`,
       `Footer text: "Télécharge l'app" and below it "Delivrou" in orange, and "www.delivrou.com".${d.bouton ? ` Small button label if any: "${d.bouton}".` : ""}`,
+      "Every object (smartphone, parcel, person) must be COMPLETELY visible inside the poster, nothing cropped at the edges and nothing hidden behind the footer; the smartphone is whole, upright or slightly tilted, with a clean readable screen.",
       "Strong depth, soft shadows, glossy premium 3D render look for the 3D elements, crisp details, realistic hands and faces.",
       "ALL TEXT must be French, spelled EXACTLY as given, with correct accents, and no other text anywhere.",
       "Strict: no logos, no brand names other than Delivrou, no food, meals or pharmacy items, no prices, no delivery times, no numbers, no extra text.",
@@ -672,6 +673,30 @@ async function genererHandler(req: Request, res: Response) {
 }
 studioRouter.post("/generer", genererHandler);
 
+/**
+ * Refaire une creation : meme commande, nouveau tirage. Avec une correction
+ * (« le telephone doit etre entier », « corrige le titre en... »), elle est
+ * ajoutee a la commande et prime sur le reste. Une nouvelle creation est
+ * ajoutee : l'ancienne reste disponible.
+ */
+studioRouter.post("/refaire", async (req: Request, res: Response) => {
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const e = journal().find((x) => x.id === t(b.id, 40));
+  if (!e || e.statut !== "pret" || !e.prompt) {
+    res.status(400).json({ ok: false, erreur: "Création introuvable ou pas terminée." });
+    return;
+  }
+  if (e.gabarit) {
+    res.status(400).json({ ok: false, erreur: "Cette création est un montage : refais-la depuis son outil." });
+    return;
+  }
+  const correction = t(b.correction, 400).trim();
+  const base = e.prompt.replace(/ CORRECTION REQUIRED[\s\S]*$/, "");
+  const prompt = correction ? `${base} CORRECTION REQUIRED (this overrides any conflicting detail above, keep everything else the same): ${correction}.` : base;
+  req.body = { genre: e.genre, type: e.type, modele: e.modele, format: e.format, structure: e.structure, titre: e.titre, sous: e.sous, idee: e.idee, prompt, pilier: e.pilier, persona: e.persona, angle: e.angle, duree: e.duree };
+  await genererHandler(req, res);
+});
+
 studioRouter.post("/finaliser", express.raw({ type: "image/png", limit: "12mb" }), async (req, res) => {
   const id = String(req.query.id || "");
   const png = req.body as Buffer;
@@ -705,14 +730,15 @@ studioRouter.post("/noter", async (req, res) => {
 });
 
 /** Catalogue reel de l'API Higgsfield pour cette cle (lecture seule), pour choisir les meilleurs modeles. */
-studioRouter.get("/catalogue-live", async (_req, res) => {
+studioRouter.get("/catalogue-live", async (req, res) => {
   const key = hfKey();
+  const slug = typeof req.query.slug === "string" ? req.query.slug.replace(/[^a-z0-9/._-]/gi, "") : "";
   if (!key) {
     res.status(503).json({ ok: false, erreur: "Cle Higgsfield absente sur le serveur." });
     return;
   }
   try {
-    const r = await fetch(`${API}/models`, { headers: { Authorization: `Key ${key}`, Accept: "application/json" }, signal: AbortSignal.timeout(20_000) });
+    const r = await fetch(`${API}/models${slug ? `/${slug}` : ""}`, { headers: { Authorization: `Key ${key}`, Accept: "application/json" }, signal: AbortSignal.timeout(20_000) });
     const texte = await r.text();
     let corps: unknown = null;
     try {
@@ -1026,6 +1052,7 @@ async function briefAffiche(angle: string): Promise<Brief> {
     "Tu es le directeur artistique de Delivrou, service de livraison de COLIS à Conakry. Invente UNE affiche pour Facebook et TikTok.",
     "Champs : t1 et t2 = les deux lignes du titre (chacune 16 caractères maximum, espaces compris, sans point final) ; sous = une phrase d'appui de 60 caractères maximum ; pastille = 2 ou 3 mots (18 caractères maximum) pour une pastille ronde ; pose parmi montre, pointe, pouce, rit ; ecran parmi " + ECRANS.join(", ") + " (l'écran de l'app le plus adapté) ; pilier parmi " + PILIERS.map((p) => "« " + p + " »").join(", ") + ".",
     "RÈGLES STRICTES : le seul service est le COLIS (jamais de repas, pharmacie, épicerie) ; aucun délai chiffré ni prix ; aucune promesse de rapidité (jamais « vite », « rapide », « express ») ; aucun chiffre inventé ; pas de paiement en espèces ; aucune fausse urgence ; pas de concours ; rien de religieux ; pas de faux avis. Tutoiement, français simple et chaleureux. Les affirmations doivent être vraies pour l'app : suivi en direct du livreur sur la carte, code de livraison à donner au livreur, prix affiché avant de valider, livreurs vérifiés.",
+    "QUALITÉ DU TITRE : t1 et t2 forment UNE seule phrase naturelle qui se lit d'une traite sur deux lignes (par exemple « Ton colis, » puis « suivi en direct »). Ce ne sont pas deux slogans séparés. Aucun mot creux ou exagéré (« magique », « incroyable », « révolution », « ultime »). Le titre est clair, vrai et compréhensible en 2 secondes, et la phrase d'appui le complète sans le répéter.",
     "SUJET IMPOSÉ de cette affiche : " + angle + ". Le titre, la phrase d'appui et la pastille doivent parler de CE sujet, avec des mots nouveaux.",
     "Titres déjà faits (ne répète ni les mots ni l'idée, trouve une autre accroche) :\n" + deja,
     'Réponds UNIQUEMENT par un objet JSON valide : {"t1":"","t2":"","sous":"","pastille":"","pose":"","ecran":"","pilier":""}',
@@ -1043,7 +1070,8 @@ async function briefAffiche(angle: string): Promise<Brief> {
     pilier: PILIERS.includes(String(o.pilier)) ? String(o.pilier) : fallback.pilier,
   };
   const trop = b.t1.length < 2 || b.t1.length > 16 || b.t2.length < 2 || b.t2.length > 18 || b.sous.length > 70 || b.pastille.length < 2 || b.pastille.length > 20;
-  if (trop || verifierRegles(b.t1, b.t2, b.sous, b.pastille).length || !neuf(b)) return fallback;
+  const creux = /magi|incroyab|miracle|révolution|revolution|ultime|meilleur|dernier cri/i.test(`${b.t1} ${b.t2} ${b.sous} ${b.pastille}`);
+  if (trop || creux || verifierRegles(b.t1, b.t2, b.sous, b.pastille).length || !neuf(b)) return fallback;
   return b;
 }
 
