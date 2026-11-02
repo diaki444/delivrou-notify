@@ -142,6 +142,8 @@ async function programmerUn(d: DemandeProgrammation, reseau: Reseau): Promise<Re
       d.tiktokMode === "direct"
         ? { privacyLevel: "PUBLIC_TO_EVERYONE", allowComment: true, allowDuet: true, allowStitch: true, commercialContentType: "none", contentPreviewConfirmed: true, expressConsentGiven: true }
         : { draft: true };
+    // Photos : TikTok peut ajouter lui-meme une musique recommandee (impossible pour les videos).
+    if (media.mime.startsWith("image/")) (corps.tiktokSettings as Record<string, unknown>).autoAddMusic = true;
   }
 
   // Meme post, meme contenu, meme heure = meme cle : un double clic ne programme pas deux fois.

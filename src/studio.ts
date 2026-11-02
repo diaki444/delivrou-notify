@@ -247,6 +247,22 @@ const HASHTAGS: Record<string, string[]> = {
   Astuces: ["#AstuceColis", "#BienEmballer"],
   "Appel à l'action": ["#AppGuinée", "#TéléchargeL'app"],
 };
+/** Question finale : elle donne envie de commenter, et les commentaires font monter la portee. */
+const QUESTIONS: Record<string, string[]> = {
+  "Comment ça marche": ["Tu connais quelqu'un qui doit envoyer un colis cette semaine ? Partage-lui ce post 👇", "Quelle étape te parle le plus ? Dis-le en commentaire 👇"],
+  Confiance: ["Pour toi, le plus important quand tu envoies un colis : le prix, la rapidité ou la confiance ? Dis-le en commentaire 👇", "Tu fais confiance à qui pour livrer tes colis aujourd'hui ? Raconte-nous 👇"],
+  "Vie de Conakry": ["Et toi, c'est quoi ton point de repère préféré à Conakry ? Dis-le en commentaire 👇", "Tu envoies quoi à ta famille en premier ? Dis-le en commentaire 👇"],
+  Astuces: ["Toi aussi tu as une astuce pour bien emballer un colis ? Partage-la en commentaire 👇", "Tu y avais pensé ? Dis-nous en commentaire 👇"],
+  "Appel à l'action": ["Tu envoies quoi en premier : un cadeau ou un document ? Réponds en commentaire 👇", "Tu connais quelqu'un qui en a besoin ? Identifie-le en commentaire 👇"],
+};
+/** Version courte pour TikTok (la legende y est limitee). */
+const QUESTIONS_TT: Record<string, string[]> = {
+  "Comment ça marche": ["Tu l'envoies à qui en premier ? 👇", "Quelle étape te parle ? 👇"],
+  Confiance: ["Prix, vitesse ou confiance : ton choix ? 👇", "Tu fais confiance à qui ? 👇"],
+  "Vie de Conakry": ["Ton point de repère à Conakry ? 👇", "Tu envoies quoi à la famille ? 👇"],
+  Astuces: ["Ton astuce pour emballer ? 👇", "Tu le savais ? 👇"],
+  "Appel à l'action": ["Un cadeau ou un document ? 👇", "Identifie quelqu'un qui en a besoin 👇"],
+};
 const hash = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
 function pick<T>(arr: T[], seed: number, n: number): T[] {
   const out: T[] = [];
@@ -268,10 +284,12 @@ function legendes(e: Pick<Entree, "id" | "titre" | "sous" | "idee" | "pilier">, 
   const appui = (e.sous || "").trim();
   const corps = pick(CORPS[p], seed, 2).filter((l) => !(appui && /prix/i.test(appui) && /prix/i.test(l)));
   const tags = [...HASHTAGS.base, ...pick(HASHTAGS[p], seed, 2)];
+  const question = pick(QUESTIONS[p], seed, 1)[0];
+  const questionTt = pick(QUESTIONS_TT[p], seed, 1)[0];
   const cta = "Télécharge l'app : www.delivrou.com\n💬 WhatsApp : wa.me/224628901285";
-  const facebook = [`${accroche} 📦`, appui, "Livraison de colis à Conakry, 7j/7.", ...corps, "", cta, "", tags.join(" ")].filter((x, i) => x !== "" || i > 0).join("\n").replace(/\n{3,}/g, "\n\n");
-  const tiktokTags = [...new Set(["#Delivrou", "#Conakry", "#Colis", ...pick(HASHTAGS[p], seed, 1), "#LivraisonConakry"])].slice(0, 5);
-  const tiktok = `${accroche} ${corps[0] || ""}`.trim().slice(0, 140) + " " + tiktokTags.join(" ");
+  const facebook = [`${accroche} 📦`, appui, "Livraison de colis à Conakry, 7j/7.", ...corps, "", question, "", cta, "", tags.join(" ")].filter((x, i) => x !== "" || i > 0).join("\n").replace(/\n{3,}/g, "\n\n");
+  const tiktokTags = [...new Set(["#Conakry", "#Guinée", "#Delivrou", ...pick(HASHTAGS[p], seed, 1), "#LivraisonConakry"])].slice(0, 5);
+  const tiktok = `${accroche} ${questionTt}`.trim().slice(0, 140) + " " + tiktokTags.join(" ");
   return { pilier: p, facebook, tiktok, hashtags: tags, motsCles: [...MOTS_CLES.base, ...MOTS_CLES[p]] };
 }
 
