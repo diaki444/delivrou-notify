@@ -192,3 +192,53 @@ export async function probe(): Promise<Record<string, unknown>> {
   }
   return out;
 }
+
+/** Base qui a repondu a une ecriture, memorisee pour la duree du process. */
+let writeBase: string | null = null;
+
+/**
+ * Appel generique (POST/GET) vers l'API Zernio. Essaie chaque base connue et
+ * ne passe a la suivante que sur un 404 ou une erreur reseau : toute autre
+ * reponse (400, 409, 422...) est definitive et renvoyee telle quelle, pour
+ * ne jamais envoyer deux fois une ecriture.
+ */
+export async function zernioRequest<T>(method: "GET" | "POST", path: string, body?: unknown, headers?: Record<string, string>): Promise<ZernioResult<T>> {
+  if (!API_KEY) return { ok: false, error: "ZERNIO_API_KEY non configuree sur le serveur." };
+  const bases = writeBase ? [writeBase, ...BASES.filter((b) => b !== writeBase)] : BASES;
+  let lastError = "Aucune base Zernio n'a repondu.";
+  for (const base of bases) {
+    const url = base.replace(/\/+$/, "") + path;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), Math.max(TIMEOUT_MS, 60000));
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { Authorization: `Bearer ${API_KEY}`, Accept: "application/json", ...(body !== undefined ? { "Content-Type": "application/json" } : {}), ...headers },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal: ctrl.signal,
+      });
+      const text = await res.text();
+      if (res.status === 404) {
+        lastError = `HTTP 404 sur ${url}`;
+        continue;
+      }
+      let parsed: unknown = null;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = null;
+      }
+      if (res.ok) {
+        writeBase = base;
+        return { ok: true, data: parsed as T, via: url };
+      }
+      const msg = parsed && typeof parsed === "object" && "error" in parsed ? String((parsed as Record<string, unknown>).error) : text.slice(0, 200);
+      return { ok: false, error: `Zernio a refuse (HTTP ${res.status}) : ${msg}`, status: res.status };
+    } catch (err) {
+      lastError = `${url} : ${err instanceof Error ? err.message : String(err)}`;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return { ok: false, error: lastError };
+}

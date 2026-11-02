@@ -1,0 +1,175 @@
+/**
+ * Programmation des posts du QG sur Facebook et TikTok, via Zernio.
+ *
+ * Le calendrier du QG envoie un post (date, heure, fichier, legende) ; ce
+ * module envoie le fichier a Zernio puis cree le post programme. Rien n'est
+ * publie sans clic : la route qui l'appelle est derriere le mot de passe du
+ * QG et l'interface demande une confirmation.
+ */
+
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { listAccounts, zernioRequest, type ZernioAccount } from "./zernio.js";
+
+const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
+const QG_DIR = path.join(AUTH_DIR, "qg");
+/** Conakry est a GMT toute l'annee, sans heure d'ete. */
+const TIMEZONE = "Africa/Conakry";
+/** Marge minimale : Zernio publie tout de suite une date deja passee. */
+const MIN_LEAD_MS = 5 * 60_000;
+
+export type Reseau = "fb" | "tt";
+export type ModeTikTok = "brouillon" | "direct";
+
+export interface DemandeProgrammation {
+  id: string;
+  date: string;
+  heure: string;
+  reseaux: Reseau[];
+  type: "image" | "video";
+  facebookFile: string | null;
+  tiktokFile: string | null;
+  facebook: string;
+  tiktok: string;
+  tiktokMode: ModeTikTok;
+}
+
+export interface ResultatReseau {
+  reseau: Reseau;
+  ok: boolean;
+  postId?: string;
+  statut?: string;
+  erreur?: string;
+}
+
+const PLATEFORME: Record<Reseau, string> = { fb: "facebook", tt: "tiktok" };
+const MIME: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".mp4": "video/mp4" };
+
+/** Fichier du QG autorise : uniquement sous media/ ou studio/creations/, jamais en dehors du dossier. */
+function resoudreFichier(rel: string): string | null {
+  const clean = path.posix.normalize(String(rel).replace(/\\/g, "/"));
+  if (!clean || clean.startsWith("/") || clean.includes("..")) return null;
+  if (!clean.startsWith("media/") && !clean.startsWith("studio/creations/")) return null;
+  const full = path.resolve(QG_DIR, clean);
+  if (!full.startsWith(path.resolve(QG_DIR) + path.sep)) return null;
+  return fs.existsSync(full) && fs.statSync(full).isFile() ? full : null;
+}
+
+/** Fichiers deja envoyes a Zernio (meme fichier non modifie = meme adresse). */
+const televerses = new Map<string, string>();
+
+async function televerser(full: string): Promise<{ ok: true; url: string; mime: string } | { ok: false; erreur: string }> {
+  const mime = MIME[path.extname(full).toLowerCase()];
+  if (!mime) return { ok: false, erreur: `Format non pris en charge : ${path.extname(full)}` };
+  const st = fs.statSync(full);
+  const cle = `${full}:${st.size}:${st.mtimeMs}`;
+  const deja = televerses.get(cle);
+  if (deja) return { ok: true, url: deja, mime };
+
+  const pre = await zernioRequest<{ uploadUrl?: string; publicUrl?: string }>("POST", "/v1/media/presign", { filename: path.basename(full), contentType: mime, size: st.size });
+  if (!pre.ok) return { ok: false, erreur: pre.error };
+  const { uploadUrl, publicUrl } = pre.data ?? {};
+  if (!uploadUrl || !publicUrl) return { ok: false, erreur: "Zernio n'a pas donne d'adresse d'envoi." };
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 5 * 60_000);
+  try {
+    const put = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Type": mime }, body: fs.readFileSync(full), signal: ctrl.signal });
+    if (!put.ok) return { ok: false, erreur: `Envoi du fichier refuse (HTTP ${put.status}).` };
+  } catch (err) {
+    return { ok: false, erreur: `Envoi du fichier impossible : ${err instanceof Error ? err.message : String(err)}` };
+  } finally {
+    clearTimeout(timer);
+  }
+  televerses.set(cle, publicUrl);
+  return { ok: true, url: publicUrl, mime };
+}
+
+async function trouverCompte(plateforme: string): Promise<{ ok: true; compte: ZernioAccount } | { ok: false; erreur: string }> {
+  const r = await listAccounts();
+  if (!r.ok) return { ok: false, erreur: r.error };
+  const candidats = r.data.filter((a) => String(a.platform ?? "").toLowerCase() === plateforme && a.isActive !== false);
+  if (candidats.length === 0) return { ok: false, erreur: `Aucun compte ${plateforme} connecte dans Zernio.` };
+  return { ok: true, compte: candidats[0] };
+}
+
+/** Verifie la demande et renvoie un message d'erreur, ou null si tout est bon. */
+export function verifierDemande(d: DemandeProgrammation, maintenant = Date.now()): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d.date) || !/^\d{2}:\d{2}$/.test(d.heure)) return "Date ou heure illisible.";
+  const quand = Date.parse(`${d.date}T${d.heure}:00Z`);
+  if (!Number.isFinite(quand)) return "Date ou heure illisible.";
+  if (quand < maintenant + MIN_LEAD_MS) return "L'heure est deja passee (ou dans moins de 5 minutes) : Zernio publierait tout de suite. Reportez le post d'abord.";
+  if (!Array.isArray(d.reseaux) || d.reseaux.length === 0) return "Aucun reseau choisi.";
+  if (d.reseaux.some((r) => r !== "fb" && r !== "tt")) return "Reseau inconnu.";
+  return null;
+}
+
+async function programmerUn(d: DemandeProgrammation, reseau: Reseau): Promise<ResultatReseau> {
+  const plateforme = PLATEFORME[reseau];
+  const rel = reseau === "tt" ? d.tiktokFile || d.facebookFile : d.facebookFile;
+  const full = rel ? resoudreFichier(rel) : null;
+  if (!full) return { reseau, ok: false, erreur: "Fichier du post introuvable sur le serveur." };
+
+  const compte = await trouverCompte(plateforme);
+  if (!compte.ok) return { reseau, ok: false, erreur: compte.erreur };
+  const media = await televerser(full);
+  if (!media.ok) return { reseau, ok: false, erreur: media.erreur };
+
+  const texte = (reseau === "tt" ? d.tiktok : d.facebook) || "";
+  const corps: Record<string, unknown> = {
+    content: texte,
+    mediaItems: [{ type: media.mime.startsWith("video/") ? "video" : "image", url: media.url }],
+    platforms: [{ platform: plateforme, accountId: compte.compte.id }],
+    scheduledFor: `${d.date}T${d.heure}:00Z`,
+    timezone: TIMEZONE,
+    metadata: { qgId: d.id, qgReseau: reseau },
+  };
+  if (reseau === "tt") {
+    corps.tiktokSettings =
+      d.tiktokMode === "direct"
+        ? { privacyLevel: "PUBLIC_TO_EVERYONE", allowComment: true, allowDuet: true, allowStitch: true, commercialContentType: "none", contentPreviewConfirmed: true, expressConsentGiven: true }
+        : { draft: true };
+  }
+
+  // Meme post, meme contenu, meme heure = meme cle : un double clic ne programme pas deux fois.
+  const cle = crypto.createHash("sha1").update(JSON.stringify([d.id, reseau, d.date, d.heure, rel, texte, d.tiktokMode])).digest("hex");
+  const r = await zernioRequest<{ post?: { _id?: string; status?: string } }>("POST", "/v1/posts", corps, { "Idempotency-Key": cle });
+  if (!r.ok) return { reseau, ok: false, erreur: r.error };
+  return { reseau, ok: true, postId: r.data?.post?._id, statut: r.data?.post?.status };
+}
+
+export async function programmer(d: DemandeProgrammation): Promise<ResultatReseau[]> {
+  const out: ResultatReseau[] = [];
+  for (const reseau of d.reseaux) out.push(await programmerUn(d, reseau));
+  return out;
+}
+
+export interface PostProgramme {
+  qgId: string;
+  reseau: string;
+  statut: string;
+  quand: string | null;
+  url: string | null;
+}
+
+/** Etat reel des posts envoyes par le QG, relu chez Zernio. */
+export async function lister(): Promise<{ ok: true; posts: PostProgramme[] } | { ok: false; erreur: string }> {
+  const depuis = new Date(Date.now() - 14 * 86400_000).toISOString().slice(0, 10);
+  const r = await zernioRequest<{ posts?: Array<Record<string, unknown>> }>("GET", `/v1/posts?limit=100&fromDate=${depuis}&fields=status,scheduledFor,platforms,metadata`);
+  if (!r.ok) return { ok: false, erreur: r.error };
+  const posts: PostProgramme[] = [];
+  for (const p of r.data?.posts ?? []) {
+    const meta = (p.metadata ?? {}) as Record<string, unknown>;
+    if (typeof meta.qgId !== "string") continue;
+    const plat = Array.isArray(p.platforms) ? (p.platforms[0] as Record<string, unknown> | undefined) : undefined;
+    posts.push({
+      qgId: meta.qgId,
+      reseau: String(meta.qgReseau ?? ""),
+      statut: String(plat?.status ?? p.status ?? ""),
+      quand: typeof p.scheduledFor === "string" ? p.scheduledFor : null,
+      url: typeof plat?.platformPostUrl === "string" ? plat.platformPostUrl : null,
+    });
+  }
+  return { ok: true, posts };
+}
