@@ -316,6 +316,7 @@ interface Demande {
   titre: string;
   sous: string;
   bouton: string;
+  persona?: string;
 }
 const PERSONNAGES: Record<string, { desc: string; tenue: string }> = {
   homme: { desc: "a real young Guinean man in his late twenties, short hair, light stubble", tenue: "a plain bright orange crew-neck t-shirt" },
@@ -348,6 +349,42 @@ function commandePersonnage(persona: string, pose: string): string {
   ].join(" ");
 }
 
+type Direction = (l1: string, l2: string, sous: string, personne: string) => string;
+const SOUS_TITRE = (sous: string) => (sous ? ` Under the headline a short subtitle in the same family: "${sous}".` : "");
+/** Dix affiches vraiment differentes : fond, composition, heros, typographie et pied de page changent. */
+const DIRECTIONS: Record<string, Direction> = {
+  orbite: (l1, l2, sous) =>
+    `Solid vivid orange field with a soft gradient from #EC6B2C to #F4923F and a subtle glow. One large modern smartphone upright in the center, screen facing the viewer showing a clean app map with an orange location pin, no tiny text. Around it, on a big thin white circle (an orbit), float glossy 3D icons: a plain cardboard parcel with tape, a red map pin, a green check badge, a white bell, an orange shield. No person. Headline at the top, centered, huge bold rounded geometric sans-serif, two lines: white "${l1}" then yellow (#FFD84A) "${l2}".${SOUS_TITRE(sous)} Footer: clean dark #12141A band.`,
+  moto: (l1, l2, sous) =>
+    `Soft cream (#F6F1EA) background with a big orange (#EC6B2C) rounded organic shape on one side. A joyful Guinean courier in a plain orange jacket and black helmet rides an orange scooter carrying a cardboard box along a bold winding road; a dotted route line curls around a floating smartphone showing a map. Headline at the top left, huge bold rounded sans-serif, two lines: dark #12141A "${l1}" then orange "${l2}" with a hand-drawn brush underline.${SOUS_TITRE(sous)} Footer: clean white band.`,
+  ecran: (l1, l2, sous, personne) =>
+    `Dark #12141A background with a big warm orange glow in the center. ${personne}, bursts out of a giant smartphone screen toward the viewer, upper body leaving the screen, hands reaching forward, huge natural smile, glossy 3D sparks and a flying cardboard parcel. Headline at the top, huge bold rounded sans-serif, two lines: white "${l1}" then orange (#EC6B2C) "${l2}".${SOUS_TITRE(sous)} Footer: dark band.`,
+  split: (l1, l2, sous, personne) =>
+    `Poster split in two halves by a sharp diagonal edge. Left half solid orange (#EC6B2C) with ${personne}, waist-up, smiling widely. Right half dark #12141A with a large tilted smartphone showing a map with an orange route and pin. Headline across the top overlapping both halves, huge bold rounded sans-serif, two lines: white "${l1}" then yellow (#FFD84A) "${l2}".${SOUS_TITRE(sous)} Footer: clean white band.`,
+  typo: (l1, l2, sous) =>
+    `Flat solid orange (#EC6B2C) background and a very large typographic composition: the headline fills about half of the poster, enormous ultra-bold rounded sans-serif, line 1 cream "${l1}" then line 2 white on a dark #12141A rounded highlight bar "${l2}".${SOUS_TITRE(sous)} At the bottom right a small smartphone angled and showing a map, at lower left a glossy 3D cardboard parcel, a few sparkles. Minimal, bold, graphic. No person. Footer: dark band.`,
+  sombre: (l1, l2, sous) =>
+    `Premium dark #12141A background with a glowing orange route line drawn over a stylized city map, a floating tilted smartphone in the middle with a glowing orange map screen, a glossy 3D cardboard parcel and a red map pin floating with soft orange rim light, light particles. No person. Headline at the top, white with the second line orange (#EC6B2C): "${l1}" then "${l2}", huge bold rounded sans-serif.${SOUS_TITRE(sous)} Sleek night look, like a modern ride-hailing app ad. Footer: dark band with a thin orange line.`,
+  creme: (l1, l2, sous, personne) =>
+    `Soft cream (#F6F1EA) background with a huge orange (#EC6B2C) circle behind ${personne}, who is cut out from the waist up and overflows the circle, big smile, one hand in a friendly gesture. Next to the person a smartphone showing a map. Under the headline a row of three small rounded icon chips (a parcel, a map pin, a shield) with no text. Headline at the top left, huge bold rounded sans-serif, two lines: dark #12141A "${l1}" then orange "${l2}" underlined by a hand-drawn brush stroke.${SOUS_TITRE(sous)} Footer: clean white band.`,
+  carte: (l1, l2, sous) =>
+    `Full-bleed stylized light map in soft beige with thin streets, a thick orange (#EC6B2C) route line and a big red pin, a large floating white notification card with a green check and progress dots (no readable small text), a smartphone cropped at the bottom, a small courier on an orange scooter on the route. Headline at the top on a rounded orange panel, huge bold rounded sans-serif, two lines: white "${l1}" then yellow "${l2}".${SOUS_TITRE(sous)} Footer: dark band.`,
+  colis: (l1, l2, sous) =>
+    `Solid orange field with a radial glow. A giant glossy 3D plain cardboard parcel with tape is the hero in the center, a dotted white route line loops around it, a tiny red pin and a green check badge, sparkles; a small smartphone partly visible at the bottom. No person. Headline above the parcel, huge bold rounded sans-serif, two lines: white "${l1}" then dark #12141A "${l2}".${SOUS_TITRE(sous)} Footer: cream band.`,
+  duo: (l1, l2, sous, personne) =>
+    `Two real joyful Guinean people side by side, waist-up, looking at one smartphone together: ${personne}, and a friend of a different age. Layered curved shapes in orange (#EC6B2C) and cream (#F6F1EA) behind them, a big white arc, floating map pins and a green check badge. Headline at the top, huge bold rounded sans-serif, two lines: dark #12141A "${l1}" then white on an orange bar "${l2}".${SOUS_TITRE(sous)} Footer: clean white band.`,
+};
+const DIRECTION_DE_LETTRE: Record<string, string> = { a: "creme", b: "split", c: "orbite", d: "moto", e: "ecran" };
+const STYLES_PLAN = [
+  "handheld camera, slightly shaky documentary feel",
+  "smooth slow dolly-in towards the subject",
+  "low-angle hero shot with a gentle push-in",
+  "overhead top-down shot that tilts down to the scene",
+  "side tracking shot following the subject",
+  "locked-off static shot with subtle parallax",
+];
+const LUMIERES = ["golden hour backlight", "bright midday sun with crisp shadows", "soft overcast daylight", "warm evening street lights"];
+
 function construireCommande(d: Demande, j: Entree[]): string {
   const memo = (note: "aime" | "pas") => j.filter((e) => e.note === note && e.genre === d.genre).slice(-3).map((e) => e.idee);
   const aimes = memo("aime");
@@ -356,17 +393,20 @@ function construireCommande(d: Demande, j: Entree[]): string {
   const format = FORMATS[d.format] || FORMATS["4:5"];
   if (d.genre === "affiche") {
     const titre = d.titre || "Ton colis, suivi en direct";
-    const virgule = titre.indexOf(",");
-    const ligne1 = virgule > 0 ? titre.slice(0, virgule + 1) : titre.split(" ").slice(0, Math.ceil(titre.split(" ").length / 2)).join(" ");
-    const ligne2 = virgule > 0 ? titre.slice(virgule + 1).trim() : titre.split(" ").slice(Math.ceil(titre.split(" ").length / 2)).join(" ");
+    const barre = titre.indexOf("|");
+    const virgule = barre > 0 ? barre : titre.indexOf(",");
+    const ligne1 = barre > 0 ? titre.slice(0, barre).trim() : virgule > 0 ? titre.slice(0, virgule + 1) : titre.split(" ").slice(0, Math.ceil(titre.split(" ").length / 2)).join(" ");
+    const ligne2 = virgule > 0 ? titre.slice(virgule + 1).trim().replace(/^\|\s*/, "") : titre.split(" ").slice(Math.ceil(titre.split(" ").length / 2)).join(" ");
+    const choix = DIRECTIONS[d.structure] ? d.structure : DIRECTIONS[DIRECTION_DE_LETTRE[d.structure]] ? DIRECTION_DE_LETTRE[d.structure] : aleatoire(Object.keys(DIRECTIONS));
+    const pers = PERSONNAGES[d.persona || ""] || PERSONNAGES[aleatoire(Object.keys(PERSONNAGES))];
+    const personne = `${pers.desc}, wearing ${pers.tenue}`;
+    const manuelle = d.idee && !/^Affiche :/i.test(d.idee);
     return [
-      `Vertical ${d.format === "9:16" ? "9:16" : "4:5"} premium social media poster for a parcel delivery app, in the style of a top-tier fintech app advertisement. Upper two-thirds: rich solid vivid orange background with a soft gradient from #EC6B2C to #F4923F, a subtle glow behind the person, thin white hand-drawn sketch strokes and light streaks. Bottom third: clean white area, with a big smooth curved edge rising into the orange area. Leave the top 12% of the poster EMPTY orange (no logo, no text) and leave the bottom-right of the white footer EMPTY.`,
-      `Headline, centered below the empty top band, huge bold rounded geometric sans-serif, two lines: white "${ligne1}" then italic yellow (#FFD84A) "${ligne2}".${d.sous ? ` Under it a two-line white subtitle: "${d.sous}"` : ""}`,
-      `Concept: ${d.idee}.`,
-      scene && `Composition: ${scene}.`,
-      "Center hero: a real, joyful young Guinean person, huge natural open smile, wearing a plain orange t-shirt, upper body cut out and overflowing in front of the shapes behind, photorealistic studio lighting, crisp details. With one hand they hold up a modern smartphone, screen facing the viewer, the screen showing a clean simple app screen with a white map and one big orange location pin, no tiny text. The other arm is bent and the index finger clearly POINTS at the phone, a confident 'look at this' gesture. Realistic hands.",
-      "Behind and around the person a large glossy 3D orange ring/arc sweeps from left to right, with a dotted white route line winding along it, carrying floating glossy 3D elements: a plain cardboard parcel with tape, a red map pin, a green delivery-done check badge, a small courier on an orange motorbike carrying a box, plus soft glass bubbles, sparkles and light reflections. Strong depth, soft shadows, glossy premium 3D render look, wow effect.",
-      `White footer: bold dark text on the left, "Télécharge l'app" and below it "Delivrou" in orange. Right side empty.${d.bouton ? ` Small button label if any: "${d.bouton}".` : ""}`,
+      `Vertical ${d.format === "9:16" ? "9:16" : "4:5"} premium social media poster for a parcel delivery app named Delivrou, in the style of a top-tier fintech app advertisement. Leave a clean empty margin around the edges.`,
+      DIRECTIONS[choix](ligne1, ligne2, d.sous, personne),
+      manuelle && `Concept: ${d.idee}.`,
+      `Footer text: "Télécharge l'app" and below it "Delivrou" in orange, and "www.delivrou.com".${d.bouton ? ` Small button label if any: "${d.bouton}".` : ""}`,
+      "Strong depth, soft shadows, glossy premium 3D render look for the 3D elements, crisp details, realistic hands and faces.",
       "ALL TEXT must be French, spelled EXACTLY as given, with correct accents, and no other text anywhere.",
       "Strict: no logos, no brand names other than Delivrou, no food, meals or pharmacy items, no prices, no delivery times, no numbers, no extra text.",
       aimes.length && `Spirit of posters the team liked: ${aimes.join("; ")}.`,
@@ -375,7 +415,7 @@ function construireCommande(d: Demande, j: Entree[]): string {
       .filter(Boolean)
       .join(" ");
   }
-  const base = d.type === "video" ? `Short vertical advertising video clip, ${FORMATS[d.format] || FORMATS["9:16"]}. ${d.idee}.` : `Professional advertising photograph, ${format}. ${d.idee}.`;
+  const base = d.type === "video" ? `Short vertical advertising video clip, ${FORMATS[d.format] || FORMATS["9:16"]}. ${d.idee}. Camera: ${aleatoire(STYLES_PLAN)}. Light: ${aleatoire(LUMIERES)}.` : `Professional advertising photograph, ${format}. ${d.idee}.`;
   return [
     base,
     scene && `Composition: ${scene}.`,
@@ -597,7 +637,7 @@ async function genererHandler(req: Request, res: Response) {
       date: new Date().toISOString(),
       semaine,
       idee,
-      structure: t(b.structure, 8) || "libre",
+      structure: t(b.structure, 10) || "libre",
       genre,
       titre: t(b.titre, 120),
       sous: t(b.sous, 120),
@@ -605,7 +645,7 @@ async function genererHandler(req: Request, res: Response) {
       gabarit: gabarit || undefined,
       pastille: gabarit === "delivrou-a" ? t(b.pastille, 30) : undefined,
       ecran: gabarit === "delivrou-a" ? t(b.ecran, 30).replace(/[^a-z0-9-]/gi, "") : undefined,
-      persona: gabarit === "delivrou-a" ? t(b.persona, 12) || undefined : undefined,
+      persona: t(b.persona, 12) || undefined,
       pose: gabarit === "delivrou-a" ? t(b.pose, 12) || undefined : undefined,
       angle: t(b.angle, 80) || undefined,
       nom: gabarit === "biblio" ? t(b.nom, 40).replace(/[^a-z0-9-]/gi, "") : undefined,
@@ -1022,14 +1062,14 @@ async function ideePhoto(lieu: string): Promise<string> {
 studioRouter.post("/auto", async (req: Request, res: Response) => {
   const type = (req.body as Record<string, unknown> | undefined)?.type;
   if (type === "affiche") {
-    const recents = journal().filter((e) => e.gabarit === "delivrou-a").slice(-10);
+    const recents = journal().filter((e) => e.genre === "affiche" || e.gabarit === "delivrou-a").slice(-10);
     const angle = tirerPeuUtilise(ANGLES, recents.map((e) => e.angle));
     const b = await briefAffiche(angle);
-    // Personnage, pose et ecran sont tires au sort parmi les moins utilises : jamais la meme affiche deux fois de suite.
+    // Une direction artistique entiere (fond, composition, heros, typographie) tiree au sort parmi les moins utilisees.
+    const direction = tirerPeuUtilise(Object.keys(DIRECTIONS), recents.map((e) => e.structure));
     const persona = tirerPeuUtilise(Object.keys(PERSONNAGES), recents.map((e) => e.persona));
-    const pose = tirerPeuUtilise(Object.keys(POSES), recents.map((e) => e.pose));
-    const ecran = tirerPeuUtilise(ECRANS, recents.map((e) => e.ecran));
-    req.body = { gabarit: "delivrou-a", persona, pose, titre: b.t1 + "|" + b.t2, sous: b.sous, pastille: b.pastille, ecran, pilier: b.pilier, angle, idee: "Affiche : " + b.t1 + " " + b.t2 };
+    const prompt = construireCommande({ idee: "", type: "image", genre: "affiche", format: "4:5", structure: direction, titre: b.t1 + "|" + b.t2, sous: b.sous, bouton: "", persona }, journal());
+    req.body = { genre: "affiche", type: "image", modele: "auto", format: "4:5", structure: direction, titre: b.t1 + " " + b.t2, sous: b.sous, pilier: b.pilier, angle, persona, idee: `Affiche : ${b.t1} ${b.t2} (${angle})`, prompt };
   } else if (type === "photo") {
     const lieu = tirerPeuUtilise(LIEUX_PHOTO, journal().slice(-10).map((e) => e.angle));
     const idee = await ideePhoto(lieu);
@@ -1245,7 +1285,8 @@ studioRouter.post("/scenario", async (req: Request, res: Response) => {
   const sujet = clip(corps.sujet, 200);
   const ambiance = AMBIANCES.includes(String(corps.ambiance)) ? String(corps.ambiance) : aleatoire(AMBIANCES);
   const angleAuto = aleatoire(ANGLES);
-  const cadre = `Cadre imposé pour varier : sujet = ${angleAuto} ; lieu = ${aleatoire(LIEUX_PHOTO)} ; personnage principal prénommé ${aleatoire(PRENOMS)}.`;
+  const melange = <T,>(a: T[]): T[] => [...a].sort(() => crypto.randomInt(3) - 1);
+  const cadre = `Cadre imposé pour varier : sujet = ${angleAuto} ; lieu = ${aleatoire(LIEUX_PHOTO)} ; personnage principal prénommé ${aleatoire(PRENOMS)}. Direction visuelle imposée : fond dominant = ${aleatoire(["sombre", "clair", "orange"])} ; décors à privilégier = ${melange(decorsDispo()).slice(0, 3).join(", ")} ; personnages à privilégier = ${melange(persosDispo()).slice(0, 2).join(", ")} ; première scène de type « ${aleatoire(["titre", "chat", "tel", "notif", "avatar"])} ».`;
   const duree = [30, 45, 60].includes(Number(corps.duree)) ? Number(corps.duree) : 30;
   if (!isGeminiConfigured() || limiteGemini()) {
     res.json({ ok: true, source: "modele", scenario: defaut });
