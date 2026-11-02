@@ -648,6 +648,28 @@ studioRouter.post("/noter", async (req, res) => {
   res.status(trouve ? 200 : 404).json({ ok: trouve });
 });
 
+/** Catalogue reel de l'API Higgsfield pour cette cle (lecture seule), pour choisir les meilleurs modeles. */
+studioRouter.get("/catalogue-live", async (_req, res) => {
+  const key = hfKey();
+  if (!key) {
+    res.status(503).json({ ok: false, erreur: "Cle Higgsfield absente sur le serveur." });
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/models`, { headers: { Authorization: `Key ${key}`, Accept: "application/json" }, signal: AbortSignal.timeout(20_000) });
+    const texte = await r.text();
+    let corps: unknown = null;
+    try {
+      corps = JSON.parse(texte);
+    } catch {
+      corps = null;
+    }
+    res.status(r.ok ? 200 : 502).json({ ok: r.ok, status: r.status, models: corps, brut: corps === null ? texte.slice(0, 400) : undefined });
+  } catch (err) {
+    res.status(502).json({ ok: false, erreur: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 studioRouter.get("/legendes", (req, res) => {
   const e = journal().find((x) => x.id === req.query.id);
   if (!e) {
