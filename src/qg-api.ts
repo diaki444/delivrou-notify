@@ -56,6 +56,7 @@ import {
   draftReply,
   sendReply as sendMailReply,
 } from "./email.js";
+import { filmsRouter } from "./films.js";
 import { commentairesRouter } from "./qg-commentaires.js";
 import { programmer, lister, verifierDemande, type DemandeProgrammation } from "./zernio-publish.js";
 import { otpSecuritySummary } from "./otp.js";
@@ -454,3 +455,6 @@ qgApiRouter.get("/programmer", async (_req, res) => {
 
 /** Commentaires Facebook et TikTok : lire, proposer une reponse, envoyer apres validation. */
 qgApiRouter.use("/commentaires", commentairesRouter);
+
+/** Films animes : script, voix, fabrication sur le PC de l'equipe. */
+qgApiRouter.use("/films", filmsRouter);

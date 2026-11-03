@@ -198,7 +198,7 @@ const INTERDITS: Array<[RegExp, string]> = [
   [/\b(t[ée]moignage|avis client)\b/i, "Pas de faux avis ni de faux témoignage."],
   [/\b(vite|rapide(ment)?|express|instantan[ée]?(ment)?|en un [ée]clair|imm[ée]diat(ement)?)\b/i, "Aucune promesse de rapidité : on ne dit pas « vite », « rapide » ni « express »."],
 ];
-const verifierRegles = (...textes: string[]) => {
+export const verifierRegles = (...textes: string[]) => {
   const t = textes.join(" ");
   return INTERDITS.filter(([re]) => re.test(t)).map(([, msg]) => msg);
 };
@@ -1004,7 +1004,7 @@ const motsDe = (txt: string) =>
       .filter((w) => w.length > 3 && !MOTS_VIDES.has(w)),
   );
 /** Vrai si deux textes disent presque la meme chose (la moitie des mots utiles en commun). */
-function tropProche(a: string, b: string): boolean {
+export function tropProche(a: string, b: string): boolean {
   const A = motsDe(a);
   const B = motsDe(b);
   if (!A.size || !B.size) return false;
