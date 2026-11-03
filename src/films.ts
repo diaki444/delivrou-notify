@@ -307,18 +307,18 @@ filmsRouter.put("/:id/voix", express.raw({ type: "*/*", limit: "30mb" }), (req: 
 });
 
 /** Legendes de secours (modeles de la marque) quand l'IA n'est pas disponible. */
-function legendesModele(f: Film): Legs {
-  const l = legendes({ id: f.id, titre: f.titre, sous: f.scenes[0]?.lignes.join(" ") ?? "", idee: texteVoix(f.scenes), pilier: undefined });
+export function legendesModele(f: { id: string; titre: string; texte: string }): Legs {
+  const l = legendes({ id: f.id, titre: f.titre, sous: "", idee: f.texte, pilier: undefined });
   return { facebook: l.facebook, tiktok: l.tiktok, hashtags: l.hashtags, motsCles: l.motsCles };
 }
 
 /** Legendes ecrites par l'IA : accroche, question, mots-cles et hashtags pour le referencement. */
-async function legendesIA(f: Film): Promise<Legs | null> {
+export async function legendesIA(f: { titre: string; ton?: string; texte: string; genre?: string }): Promise<Legs | null> {
   if (!isGeminiConfigured()) return null;
   const t = TONS[f.ton ?? ""] ?? TONS.chaleureux;
   const consigneL = [
-    "Tu écris les légendes de publication d'une vidéo de Delivrou (livraison de COLIS à Conakry) pour Facebook et pour TikTok.",
-    `TITRE : ${f.titre}\nTEXTE DE LA VOIX OFF : ${texteVoix(f.scenes).replace(/\n+/g, " ")}\nTON : ${t.ia}.`,
+    `Tu écris les légendes de publication de ${f.genre ?? "cette vidéo"} de Delivrou (livraison de COLIS à Conakry) pour Facebook et pour TikTok.`,
+    `TITRE : ${f.titre}\nTEXTE : ${f.texte.replace(/\n+/g, " ")}\nTON : ${t.ia}.`,
     "FACEBOOK : 1re ligne = accroche qui donne envie de lire (une émotion ou une question, pas de slogan), puis 2 à 3 courtes lignes qui disent l'essentiel, puis UNE question pour déclencher les commentaires (se termine par 👇), puis « Télécharge l'app : www.delivrou.com » et « 💬 WhatsApp : wa.me/224628901285 », puis une ligne de 6 à 8 hashtags. 1 à 3 emojis maximum, pertinents.",
     "TIKTOK : 1 phrase d'accroche + une courte question, 120 caractères maximum SANS les hashtags, puis 4 à 5 hashtags (mélange : 2 très larges comme #Conakry #Guinée, 2 à 3 précis au sujet, #Delivrou).",
     "MOTS-CLÉS : 8 à 12 expressions que les gens tapent dans la recherche (ex. « envoyer un colis à Conakry », « livraison Conakry », « suivi de colis »), utiles pour le référencement TikTok et Facebook. Les hashtags du tableau hashtags sont ceux de Facebook (6 à 8, avec #).",
@@ -344,7 +344,7 @@ filmsRouter.get("/:id/legendes", async (req: Request, res: Response) => {
   const f = lire(String(req.params.id));
   if (!f) { res.status(404).json({ ok: false, erreur: "Film inconnu" }); return; }
   if (!f.legendes) {
-    f.legendes = (await legendesIA(f)) ?? legendesModele(f);
+    f.legendes = (await legendesIA({ titre: f.titre, ton: f.ton, texte: texteVoix(f.scenes) })) ?? legendesModele({ id: f.id, titre: f.titre, texte: texteVoix(f.scenes) });
     ecrire(f);
   }
   res.json({ ok: true, ...f.legendes });
@@ -354,7 +354,7 @@ filmsRouter.get("/:id/legendes", async (req: Request, res: Response) => {
 filmsRouter.post("/:id/legendes/regenerer", async (req: Request, res: Response) => {
   const f = lire(String(req.params.id));
   if (!f) { res.status(404).json({ ok: false, erreur: "Film inconnu" }); return; }
-  const n = await legendesIA(f);
+  const n = await legendesIA({ titre: f.titre, ton: f.ton, texte: texteVoix(f.scenes) });
   if (!n) { res.status(503).json({ ok: false, erreur: "L'IA n'a pas pu écrire les légendes. Réessaie." }); return; }
   f.legendes = n;
   ecrire(f);
