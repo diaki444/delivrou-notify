@@ -16,6 +16,7 @@ import { verifierRegles, tropProche, legendes } from "./studio.js";
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
 const FILMS_DIR = path.join(AUTH_DIR, "qg", "films");
 
+export interface Legs { facebook: string; tiktok: string; hashtags: string[]; motsCles: string[] }
 export type Statut = "attente_voix" | "voix_ok" | "a_produire" | "en_production" | "pret" | "echec";
 type Scene = { type: string; lignes: string[]; [k: string]: unknown };
 export interface Film {
@@ -31,6 +32,8 @@ export interface Film {
   /** Duree visee (secondes de voix) et ton choisis a la creation. */
   duree?: number;
   ton?: string;
+  /** Legendes pretes a publier (modifiables dans le QG). */
+  legendes?: Legs;
   scenes: Scene[];
   statut: Statut;
   voix: boolean;
@@ -303,12 +306,74 @@ filmsRouter.put("/:id/voix", express.raw({ type: "*/*", limit: "30mb" }), (req: 
   res.json({ ok: true });
 });
 
-/** Legendes Facebook / TikTok du film (accroche, question, hashtags), pour la programmation. */
-filmsRouter.get("/:id/legendes", (req: Request, res: Response) => {
+/** Legendes de secours (modeles de la marque) quand l'IA n'est pas disponible. */
+function legendesModele(f: Film): Legs {
+  const l = legendes({ id: f.id, titre: f.titre, sous: f.scenes[0]?.lignes.join(" ") ?? "", idee: texteVoix(f.scenes), pilier: undefined });
+  return { facebook: l.facebook, tiktok: l.tiktok, hashtags: l.hashtags, motsCles: l.motsCles };
+}
+
+/** Legendes ecrites par l'IA : accroche, question, mots-cles et hashtags pour le referencement. */
+async function legendesIA(f: Film): Promise<Legs | null> {
+  if (!isGeminiConfigured()) return null;
+  const t = TONS[f.ton ?? ""] ?? TONS.chaleureux;
+  const consigneL = [
+    "Tu écris les légendes de publication d'une vidéo de Delivrou (livraison de COLIS à Conakry) pour Facebook et pour TikTok.",
+    `TITRE : ${f.titre}\nTEXTE DE LA VOIX OFF : ${texteVoix(f.scenes).replace(/\n+/g, " ")}\nTON : ${t.ia}.`,
+    "FACEBOOK : 1re ligne = accroche qui donne envie de lire (une émotion ou une question, pas de slogan), puis 2 à 3 courtes lignes qui disent l'essentiel, puis UNE question pour déclencher les commentaires (se termine par 👇), puis « Télécharge l'app : www.delivrou.com » et « 💬 WhatsApp : wa.me/224628901285 », puis une ligne de 6 à 8 hashtags. 1 à 3 emojis maximum, pertinents.",
+    "TIKTOK : 1 phrase d'accroche + une courte question, 120 caractères maximum SANS les hashtags, puis 4 à 5 hashtags (mélange : 2 très larges comme #Conakry #Guinée, 2 à 3 précis au sujet, #Delivrou).",
+    "MOTS-CLÉS : 8 à 12 expressions que les gens tapent dans la recherche (ex. « envoyer un colis à Conakry », « livraison Conakry », « suivi de colis »), utiles pour le référencement TikTok et Facebook. Les hashtags du tableau hashtags sont ceux de Facebook (6 à 8, avec #).",
+    "RÈGLES STRICTES : le seul service est le COLIS (jamais repas, pharmacie, épicerie) ; aucun délai chiffré ni prix ; jamais « vite », « rapide », « express » ; aucun chiffre inventé ; pas de paiement en espèces ; aucune fausse urgence ; pas de concours ; rien de religieux ; pas de faux avis.",
+    'Réponds UNIQUEMENT par un objet JSON : {"facebook":"","tiktok":"","hashtags":["#"],"motsCles":[""]}',
+  ].join("\n\n");
+  for (let essai = 0; essai < 3; essai++) {
+    const r = await askGeminiEmail(consigneL);
+    const o = r.ok && r.text ? extraire(r.text) : null;
+    if (!o) continue;
+    const fb = court(o.facebook, 2000), tt = court(o.tiktok, 300);
+    const tags = (Array.isArray(o.hashtags) ? o.hashtags : []).map((h) => "#" + String(h).replace(/[^\p{L}\p{N}_]/gu, "")).filter((h) => h.length > 2).slice(0, 10);
+    const mots = (Array.isArray(o.motsCles) ? o.motsCles : []).map((m) => court(m, 60)).filter(Boolean).slice(0, 14);
+    if (fb.length < 40 || tt.length < 10) continue;
+    if (verifierRegles(fb, tt, mots.join(" ")).length) continue;
+    return { facebook: fb, tiktok: tt, hashtags: tags, motsCles: mots };
+  }
+  return null;
+}
+
+/** Donne les legendes du film : celles enregistrees, sinon l'IA, sinon les modeles. */
+filmsRouter.get("/:id/legendes", async (req: Request, res: Response) => {
   const f = lire(String(req.params.id));
   if (!f) { res.status(404).json({ ok: false, erreur: "Film inconnu" }); return; }
-  const l = legendes({ id: f.id, titre: f.titre, sous: f.scenes[0]?.lignes.join(" ") ?? "", idee: texteVoix(f.scenes), pilier: undefined });
-  res.json({ ok: true, facebook: l.facebook, tiktok: l.tiktok });
+  if (!f.legendes) {
+    f.legendes = (await legendesIA(f)) ?? legendesModele(f);
+    ecrire(f);
+  }
+  res.json({ ok: true, ...f.legendes });
+});
+
+/** Reecrit les legendes avec l'IA (autre angle a chaque fois). */
+filmsRouter.post("/:id/legendes/regenerer", async (req: Request, res: Response) => {
+  const f = lire(String(req.params.id));
+  if (!f) { res.status(404).json({ ok: false, erreur: "Film inconnu" }); return; }
+  const n = await legendesIA(f);
+  if (!n) { res.status(503).json({ ok: false, erreur: "L'IA n'a pas pu écrire les légendes. Réessaie." }); return; }
+  f.legendes = n;
+  ecrire(f);
+  res.json({ ok: true, ...n });
+});
+
+/** Enregistre les legendes modifiees a la main. */
+filmsRouter.put("/:id/legendes", express.json({ limit: "16kb" }), (req: Request, res: Response) => {
+  const f = lire(String(req.params.id));
+  if (!f) { res.status(404).json({ ok: false, erreur: "Film inconnu" }); return; }
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const liste = (v: unknown, n: number) => (Array.isArray(v) ? v : []).map((x) => court(x, 80)).filter(Boolean).slice(0, n);
+  const l: Legs = { facebook: court(b.facebook, 2000), tiktok: court(b.tiktok, 300), hashtags: liste(b.hashtags, 12), motsCles: liste(b.motsCles, 16) };
+  if (!l.facebook || !l.tiktok) { res.status(400).json({ ok: false, erreur: "Les deux légendes sont nécessaires." }); return; }
+  const alertes = verifierRegles(l.facebook, l.tiktok);
+  if (alertes.length) { res.status(400).json({ ok: false, erreur: alertes[0] }); return; }
+  f.legendes = l;
+  ecrire(f);
+  res.json({ ok: true });
 });
 
 /**
