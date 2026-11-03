@@ -20,6 +20,7 @@ import { requireDashboardAuth } from "./auth.js";
 import { getLatestByPlatform, weeklySeries, getLastRun } from "./stats.js";
 import { qgApiRouter } from "./qg-api.js";
 import { filmsMachineRouter } from "./films.js";
+import { affichesMachineRouter } from "./affiches-captures.js";
 import { studioRouter } from "./studio.js";
 
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
@@ -165,6 +166,7 @@ qgRouter.delete("/file/*", requireNotifyKey, (req, res) => {
 
 // Films animes : le PC de l'equipe vient chercher les films a produire (cle partagee, pas de mot de passe).
 qgRouter.use("/machine/films", requireNotifyKey, filmsMachineRouter);
+qgRouter.use("/machine/affiches", requireNotifyKey, affichesMachineRouter);
 
 // --- A partir d'ici : reserve a Ibrahima et Bachir (mot de passe) ---
 qgRouter.use(requireDashboardAuth);

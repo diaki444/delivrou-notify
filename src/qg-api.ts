@@ -57,6 +57,7 @@ import {
   sendReply as sendMailReply,
 } from "./email.js";
 import { filmsRouter } from "./films.js";
+import { affichesCapturesRouter } from "./affiches-captures.js";
 import { commentairesRouter } from "./qg-commentaires.js";
 import { programmer, lister, verifierDemande, type DemandeProgrammation } from "./zernio-publish.js";
 import { otpSecuritySummary } from "./otp.js";
@@ -458,3 +459,4 @@ qgApiRouter.use("/commentaires", commentairesRouter);
 
 /** Films animes : script, voix, fabrication sur le PC de l'equipe. */
 qgApiRouter.use("/films", filmsRouter);
+qgApiRouter.use("/affiches-captures", affichesCapturesRouter);
