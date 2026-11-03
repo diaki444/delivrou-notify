@@ -28,6 +28,9 @@ export interface Film {
   /** Variante de fond (ex. « nuit ») et graine : choisies par le serveur pour que deux films ne se ressemblent jamais. */
   variante?: string;
   graine?: string;
+  /** Duree visee (secondes de voix) et ton choisis a la creation. */
+  duree?: number;
+  ton?: string;
   scenes: Scene[];
   statut: Statut;
   voix: boolean;
@@ -172,13 +175,27 @@ function nettoyer(brut: unknown, permises: string[] = Object.keys(NB_LIGNES)): {
   return { scenes, erreurs };
 }
 
-function consigne(sujet: string, note: string, recents: string[], permises: string[]): string {
+/** Tons proposes dans le QG : consigne pour l'IA + conseil de reglage ElevenLabs. */
+export const TONS: Record<string, { nom: string; ia: string; voix: string }> = {
+  chaleureux: { nom: "Chaleureux", ia: "chaleureux et rassurant, comme un grand frère de confiance", voix: "Voix posée et souriante. Stabilité ≈ 50 %." },
+  enthousiaste: { nom: "Enthousiaste", ia: "plein d'énergie et d'enthousiasme, ça respire la bonne nouvelle, quelques exclamations", voix: "Voix dynamique. Stabilité ≈ 30 %, style élevé. Tu peux mettre [excited] au début des phrases fortes dans ElevenLabs (modèle v3)." },
+  drole: { nom: "Drôle", ia: "drôle : une situation de la vie à Conakry exagérée avec tendresse, une chute ou un petit retournement, humour léger jamais moqueur (ni religion, ni ethnie, ni personne réelle)", voix: "Voix expressive. Stabilité ≈ 25 %, style élevé. Dans ElevenLabs (modèle v3) tu peux ajouter [laughs] ou [chuckles] aux bons endroits : à NE PAS écrire dans la vidéo, seulement dans ElevenLabs." },
+  rigolo: { nom: "Rigolo", ia: "rigolo et complice, comme entre amis : taquineries gentilles, expressions parlées de Conakry, rythme vif", voix: "Voix joueuse. Stabilité ≈ 25 %. Dans ElevenLabs (modèle v3) : [laughs] ou [giggles] ponctuels, seulement dans ElevenLabs." },
+  rassurant: { nom: "Sérieux et rassurant", ia: "sérieux, calme et rassurant : on parle de confiance, de sécurité, de contrôle", voix: "Voix grave et posée. Stabilité ≈ 65 %." },
+  punchy: { nom: "Direct et punchy", ia: "direct et percutant : phrases très courtes, rythme rapide, zéro blabla", voix: "Voix tranchée. Stabilité ≈ 35 %, débit un peu rapide." },
+};
+
+function consigne(sujet: string, note: string, recents: string[], permises: string[], duree = 40, ton = "chaleureux"): string {
+  const t = TONS[ton] ?? TONS.chaleureux;
+  const mots = Math.round(duree * 2.6);
+  const nbScenes = duree <= 25 ? "3 à 4" : duree <= 45 ? "4 à 6" : "6 à 9";
   return [
-    "Tu écris le script d'un film court (35 à 45 secondes) pour Facebook et TikTok, pour Delivrou, service de livraison de COLIS à Conakry. Une voix off lit tout le texte ; l'image est du motion design.",
+    `Tu écris le script d'un film court d'environ ${duree} secondes de voix (environ ${mots} mots en tout, toutes les lignes confondues) pour Facebook et TikTok, pour Delivrou, service de livraison de COLIS à Conakry. Une voix off lit tout le texte ; l'image est du motion design.`,
     `SUJET : ${sujet}. ${note}`,
-    "Ton : tutoiement, français simple et chaleureux de Conakry, phrases courtes.",
+    `TON DU FILM : ${t.ia}. Ce ton se sent dès la première ligne et jusqu'au bout. Tutoiement, français simple de Conakry, phrases courtes.`,
+    "HOOK PARFAIT (le plus important) : les 3 premières secondes (scène accroche) doivent arrêter le pouce. Une vraie situation vécue, une question qui pique, une contradiction ou une petite blague, dans le ton choisi. Jamais « Salut », « Bonjour », « Bienvenue », « Découvrez », ni un slogan. L'accroche doit donner envie de connaître la suite.",
     `Scènes autorisées pour CE sujet (et seulement celles-là, en plus de « accroche ») : ${permises.join(", ")}. Choisis les plus pertinentes ; n'utilise pas une scène si elle ne correspond pas au sujet. Les captures d'écran de l'appli (scène « ecran ») sont préférées aux dessins quand elles illustrent le sujet.`,
-    "Le film suit une suite de scènes choisies parmi celles-ci (chacune une seule fois, 3 à 6 scènes au total, la première est toujours « accroche »). Chaque scène a un nombre EXACT de phrases de voix dans le champ lignes (une phrase ou un morceau de phrase par ligne, de 2 à 9 mots, la ponctuation reste dans la ligne) :",
+    `Le film suit une suite de scènes choisies parmi celles-ci (chacune une seule fois sauf « ecran », ${nbScenes} scènes au total, la première est toujours « accroche »). Chaque scène a un nombre EXACT de phrases de voix dans le champ lignes (une phrase ou un morceau de phrase par ligne, de 2 à 9 mots, la ponctuation reste dans la ligne) :`,
     '• accroche (4 lignes) : l\'accroche. Lignes 1 et 2 = la première partie (ex. « À Conakry, » / « personne n\'a d\'adresse. »), lignes 3 et 4 = la question (ex. « Alors, » / « comment on envoie un colis ? »). Champs : objet (colis|repere|scooter|telephone|coche|bulle|bouclier|cloche|enveloppe).',
     '• bulles (2 lignes) : le « avant », des messages qui s\'empilent. Champs : etiquette (ex. "AVANT"), messages (exactement 5 {de:"in"|"out", texte ≤ 22 caractères}), appel (ex. "Appel manqué"), objet, symbole ("?").',
     '• champ (5 lignes si 3 puces) : un champ de formulaire qui se remplit, puis 3 puces cochées une par ligne (lignes 3, 4, 5). Champs : titre, label (en MAJUSCULES, ex. "POINT DE REPÈRE DÉPART *"), valeur (≤ 24 caractères), aide (≤ 60), puces (3 {texte ≤ 22, vignette: th-marche|th-ville|th-rue}).',
@@ -218,7 +235,7 @@ export const filmsRouter = express.Router();
 
 filmsRouter.get("/", (_req, res) => {
   res.set("Cache-Control", "no-store");
-  res.json({ ok: true, films: tous().map((f) => ({ ...f, texte: texteVoix(f.scenes) })), sujets: SUJETS, ia: isGeminiConfigured(), pcVuIlYA: dernierPassagePc ? Math.round((Date.now() - dernierPassagePc) / 1000) : null });
+  res.json({ ok: true, films: tous().map((f) => ({ ...f, texte: texteVoix(f.scenes), conseilVoix: TONS[f.ton ?? ""]?.voix ?? "" })), tons: Object.entries(TONS).map(([id, t]) => ({ id, nom: t.nom })), sujets: SUJETS, ia: isGeminiConfigured(), pcVuIlYA: dernierPassagePc ? Math.round((Date.now() - dernierPassagePc) / 1000) : null });
 });
 
 /** Ecrit le script d'un nouveau film (le sujet « colis » reprend le texte valide). */
@@ -231,6 +248,8 @@ filmsRouter.post("/script", express.json({ limit: "64kb" }), async (req: Request
   if (String(b.fond) === "auto" || !b.fond) ({ fond, variante } = choisirFond(tous()));
   const preset = SUJETS.find((s) => s.id === sujetId);
   const libre = court(b.libre, 200);
+  const duree = Math.max(15, Math.min(90, Math.round(Number(b.duree) || 40)));
+  const ton = TONS[String(b.ton)] ? String(b.ton) : "chaleureux";
   let titre = preset?.titre ?? libre ?? "Film";
   let scenes: Scene[];
   if (sujetId === "colis") {
@@ -248,7 +267,7 @@ filmsRouter.post("/script", express.json({ limit: "64kb" }), async (req: Request
     let ok: Scene[] | null = null;
     let dernier = "";
     for (let essai = 0; essai < 3 && !ok; essai++) {
-      const r = await askGeminiEmail(consigne(sujetId === "libre" ? libre : (preset?.titre ?? libre), preset?.note ?? "", recents, SCENES_PERMISES[sujetId] ?? SCENES_PERMISES.libre));
+      const r = await askGeminiEmail(consigne(sujetId === "libre" ? libre : (preset?.titre ?? libre), preset?.note ?? "", recents, SCENES_PERMISES[sujetId] ?? SCENES_PERMISES.libre, duree, ton));
       const o = r.ok && r.text ? extraire(r.text) : null;
       if (!o) { dernier = r.error || "Réponse illisible."; continue; }
       const { scenes: sc, erreurs } = nettoyer(o.scenes, SCENES_PERMISES[sujetId] ?? SCENES_PERMISES.libre);
@@ -266,7 +285,7 @@ filmsRouter.post("/script", express.json({ limit: "64kb" }), async (req: Request
     }
     scenes = ok;
   }
-  const film: Film = { id: `${Date.now().toString(36)}-${crypto.randomBytes(2).toString("hex")}`, date: new Date().toISOString(), sujet: sujetId || "libre", titre, format, fond, variante, graine: crypto.randomBytes(4).toString("hex"), scenes, statut: "attente_voix", voix: false };
+  const film: Film = { id: `${Date.now().toString(36)}-${crypto.randomBytes(2).toString("hex")}`, date: new Date().toISOString(), sujet: sujetId || "libre", titre, format, fond, variante, graine: crypto.randomBytes(4).toString("hex"), duree, ton, scenes, statut: "attente_voix", voix: false };
   ecrire(film);
   res.json({ ok: true, film: { ...film, texte: texteVoix(film.scenes) } });
 });
@@ -306,7 +325,7 @@ filmsRouter.post("/:id/refaire", express.json({ limit: "8kb" }), async (req: Req
   let { fond, variante } = choisirFond(tous());
   if (["photo", "degrade", "uni", "motif"].includes(String(b.fond))) { fond = String(b.fond) as Film["fond"]; variante = ""; }
   const id = `${Date.now().toString(36)}-${crypto.randomBytes(2).toString("hex")}`;
-  const base: Film = { id, date: new Date().toISOString(), sujet: f.sujet, titre: f.titre, format, fond, variante, graine: crypto.randomBytes(4).toString("hex"), scenes: f.scenes, statut: "attente_voix", voix: false };
+  const base: Film = { id, date: new Date().toISOString(), sujet: f.sujet, titre: f.titre, duree: f.duree, ton: f.ton, format, fond, variante, graine: crypto.randomBytes(4).toString("hex"), scenes: f.scenes, statut: "attente_voix", voix: false };
   if (!demande) {
     fs.mkdirSync(dossier(id), { recursive: true });
     const v = path.join(dossier(f.id), "voix.mp3");
@@ -324,7 +343,7 @@ filmsRouter.post("/:id/refaire", express.json({ limit: "8kb" }), async (req: Req
   let ok: Scene[] | null = null;
   let dernier = "";
   for (let essai = 0; essai < 3 && !ok; essai++) {
-    const r = await askGeminiEmail(consigne(f.titre, note, [], permises));
+    const r = await askGeminiEmail(consigne(f.titre, note, [], permises, f.duree ?? 40, f.ton ?? "chaleureux"));
     const o = r.ok && r.text ? extraire(r.text) : null;
     if (!o) { dernier = r.error || "Réponse illisible."; continue; }
     const { scenes: sc, erreurs } = nettoyer(o.scenes, permises);
