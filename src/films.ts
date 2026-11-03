@@ -25,6 +25,9 @@ export interface Film {
   titre: string;
   format: "9:16" | "1:1" | "16:9";
   fond: "photo" | "degrade" | "uni" | "motif";
+  /** Variante de fond (ex. « nuit ») et graine : choisies par le serveur pour que deux films ne se ressemblent jamais. */
+  variante?: string;
+  graine?: string;
   scenes: Scene[];
   statut: Statut;
   voix: boolean;
@@ -63,10 +66,37 @@ const tous = (): Film[] => {
     .sort((a, b) => b.date.localeCompare(a.date));
 };
 
+// ───────────── Bibliotheque des vraies captures de l'appli (deposee par deploy-qg) ─────────────
+interface Zone { id: string; label: string; saisie?: { px: number } }
+interface Capture { id: string; titre: string; quoi: string; theme: string; zones: Zone[] }
+let cacheBib: { t: number; liste: Capture[] } = { t: 0, liste: [] };
+function bibliotheque(): Capture[] {
+  const f = path.join(AUTH_DIR, "qg", "ecrans-app", "ecrans.json");
+  try {
+    const t = fs.statSync(f).mtimeMs;
+    if (t !== cacheBib.t) cacheBib = { t, liste: (JSON.parse(fs.readFileSync(f, "utf8")) as { ecrans: Capture[] }).ecrans };
+  } catch {
+    cacheBib = { t: 0, liste: [] };
+  }
+  return cacheBib.liste;
+}
+
+// ───────────── Fonds : jamais deux films avec le meme fond ─────────────
+const COMBOS: Array<[Film["fond"], string]> = [["photo", ""], ["degrade", "orange"], ["degrade", "nuit"], ["degrade", "braise"], ["degrade", "aube"], ["motif", "points"], ["motif", "lignes"], ["motif", "grille"], ["motif", "cercles"], ["uni", "ink"], ["uni", "nuit"], ["uni", "braise"], ["uni", "orange"]];
+function choisirFond(recents: Film[]): { fond: Film["fond"]; variante: string } {
+  const usages = new Map<string, number>(COMBOS.map(([f, v]) => [f + ":" + v, 0]));
+  recents.slice(0, 8).forEach((r, i) => { const k = r.fond + ":" + (r.variante ?? ""); if (usages.has(k)) usages.set(k, (usages.get(k) || 0) + (8 - i)); });
+  const min = Math.min(...usages.values());
+  const libres = COMBOS.filter(([f, v]) => usages.get(f + ":" + v) === min);
+  const [fond, variante] = libres[crypto.randomInt(libres.length)];
+  return { fond, variante };
+}
+
 // ───────────── Vocabulaire des scenes : combien de phrases de voix chacune consomme ─────────────
 const NB_LIGNES: Record<string, (s: Scene) => number> = {
   accroche: () => 4, bulles: () => 2, champ: (s) => 2 + (Array.isArray(s.puces) ? Math.min(3, s.puces.length) : 0), carte: () => 3,
   paiement: (s) => 3 + (Array.isArray(s.pastilles) ? Math.min(3, s.pastilles.length) : 0), livreur: () => 4, code: () => 4, fin: () => 4,
+  ecran: (s) => (Array.isArray(s.etapes) ? Math.min(4, s.etapes.length) : 0),
 };
 const OBJETS = ["colis", "repere", "scooter", "telephone", "coche", "bulle", "bouclier", "cloche", "enveloppe"];
 const PERSOS = ["per-livreur2", "per-maman", "per-jeune-femme"];
@@ -83,10 +113,10 @@ export const SUJETS: Array<{ id: string; titre: string; note: string }> = [
 
 /** Scènes qui ont un sens pour chaque sujet (le code de livraison et le livreur ne vont pas dans un film sur le parrainage). */
 const SCENES_PERMISES: Record<string, string[]> = {
-  points: ["bulles", "champ", "carte", "paiement"],
-  emballage: ["bulles", "champ", "carte"],
-  suivi: ["bulles", "champ", "livreur", "code"],
-  libre: ["bulles", "champ", "carte", "paiement", "livreur", "code"],
+  points: ["bulles", "champ", "carte", "paiement", "ecran"],
+  emballage: ["bulles", "champ", "carte", "ecran"],
+  suivi: ["bulles", "champ", "livreur", "code", "ecran"],
+  libre: ["bulles", "champ", "carte", "paiement", "livreur", "code", "ecran"],
 };
 const PRESET_COLIS: Scene[] = [
   { type: "accroche", lignes: ["À Conakry,", "personne n'a d'adresse.", "Alors,", "comment on envoie un colis ?"], split: 2, objet: "colis", fond: "rue", sousTitres: false },
@@ -108,6 +138,19 @@ function nettoyer(brut: unknown, permises: string[] = Object.keys(NB_LIGNES)): {
   const vus = new Set<string>();
   for (const x of arr as Array<Record<string, unknown>>) {
     const type = String(x?.type ?? "");
+    if (type === "ecran") {
+      const cap = bibliotheque().find((c) => c.id === String(x.image));
+      const etapes = (Array.isArray(x.etapes) ? x.etapes : []).slice(0, 4).map((e0) => {
+        const e1 = (e0 ?? {}) as Record<string, unknown>;
+        const zone = cap?.zones.find((z) => z.id === String(e1.zone)) ?? cap?.zones[0];
+        return { zone: zone?.id ?? "", zoom: Math.max(1, Math.min(2.2, Number(e1.zoom) || 1.6)), ...(zone?.saisie && e1.saisie ? { saisie: court(e1.saisie, 34) } : {}) };
+      });
+      const lignes = (Array.isArray(x.lignes) ? x.lignes : []).map((l) => court(l, 70)).filter(Boolean);
+      if (!cap || etapes.length < 2 || lignes.length !== etapes.length) { erreurs.push("« ecran » invalide (image inconnue ou nombre de lignes différent des étapes)"); continue; }
+      if (scenes.filter((q) => q.type === "ecran").length >= 3 || !permises.includes("ecran")) continue;
+      scenes.push({ type: "ecran", lignes, image: cap.id, etapes });
+      continue;
+    }
     if (!NB_LIGNES[type] || type === "fin" || vus.has(type) || (type !== "accroche" && !permises.includes(type))) continue;
     vus.add(type);
     const s: Scene = { ...x, type, lignes: (Array.isArray(x.lignes) ? x.lignes : []).map((l) => court(l, 70)).filter(Boolean) };
@@ -134,7 +177,7 @@ function consigne(sujet: string, note: string, recents: string[], permises: stri
     "Tu écris le script d'un film court (35 à 45 secondes) pour Facebook et TikTok, pour Delivrou, service de livraison de COLIS à Conakry. Une voix off lit tout le texte ; l'image est du motion design.",
     `SUJET : ${sujet}. ${note}`,
     "Ton : tutoiement, français simple et chaleureux de Conakry, phrases courtes.",
-    `Scènes autorisées pour CE sujet (et seulement celles-là, en plus de « accroche ») : ${permises.join(", ")}. Choisis les plus pertinentes ; n'utilise pas une scène si elle ne correspond pas au sujet.`,
+    `Scènes autorisées pour CE sujet (et seulement celles-là, en plus de « accroche ») : ${permises.join(", ")}. Choisis les plus pertinentes ; n'utilise pas une scène si elle ne correspond pas au sujet. Les captures d'écran de l'appli (scène « ecran ») sont préférées aux dessins quand elles illustrent le sujet.`,
     "Le film suit une suite de scènes choisies parmi celles-ci (chacune une seule fois, 3 à 6 scènes au total, la première est toujours « accroche »). Chaque scène a un nombre EXACT de phrases de voix dans le champ lignes (une phrase ou un morceau de phrase par ligne, de 2 à 9 mots, la ponctuation reste dans la ligne) :",
     '• accroche (4 lignes) : l\'accroche. Lignes 1 et 2 = la première partie (ex. « À Conakry, » / « personne n\'a d\'adresse. »), lignes 3 et 4 = la question (ex. « Alors, » / « comment on envoie un colis ? »). Champs : objet (colis|repere|scooter|telephone|coche|bulle|bouclier|cloche|enveloppe).',
     '• bulles (2 lignes) : le « avant », des messages qui s\'empilent. Champs : etiquette (ex. "AVANT"), messages (exactement 5 {de:"in"|"out", texte ≤ 22 caractères}), appel (ex. "Appel manqué"), objet, symbole ("?").',
@@ -143,10 +186,12 @@ function consigne(sujet: string, note: string, recents: string[], permises: stri
     '• paiement (6 lignes avec 3 pastilles) : mode de paiement. Champs : etiquette, option {tag, titre, sous}, pastilles (3 {texte, couleur: or|jaune|creme, icone: tel|carte|""}), prix (ex. "Prix affiché avant de valider"), bouton, ok.',
     '• livreur (4 lignes) : le livreur vérifié et le suivi sur la carte. Champs : persona (per-livreur2|per-maman|per-jeune-femme), pill, notif {titre, sous}.',
     '• code (4 lignes) : le code de livraison puis la remise à la bonne personne. Champs : etiquette, chiffres (4 chiffres), personne {image: per-maman|per-livreur2|per-jeune-femme, texte}.',
+    `• ecran (2 à 4 lignes, une par étape) : une VRAIE capture de l'appli, avec zoom sur une zone, mise en valeur, curseur qui clique et parfois du texte qui s'écrit dans un champ vide. Champs : image (un id de la liste ci-dessous), etapes (une par ligne de voix : {zone: id de zone, saisie?: texte à écrire seulement si la zone est marquée [saisie] (≤ 30 caractères), zoom?: 1 à 2}). Utilise 1 à 3 scènes « ecran » : c'est la preuve visuelle que l'appli fait bien ce que dit la voix. Plusieurs scènes ecran peuvent utiliser des images différentes.`,
+    "CAPTURES DISPONIBLES (id : ce que l'écran montre ; zones) :\n" + bibliotheque().map((c) => `- ${c.id} : ${c.quoi} Zones : ${c.zones.map((z) => z.id + (z.saisie ? " [saisie]" : "")).join(", ")}.`).join("\n"),
     "La scène finale « fin » est ajoutée automatiquement : n'écris pas la conclusion et ne mets pas d'appel à télécharger.",
     "RÈGLES STRICTES : le seul service disponible est le COLIS (jamais repas, pharmacie, épicerie) ; aucun délai chiffré ni prix ; aucune promesse de rapidité (jamais « vite », « rapide », « express ») ; aucun chiffre inventé (sauf ceux confirmés : 50 Deli-points par parrainage = 5 000 GNF, 1 point = 100 GNF) ; pas de paiement en espèces ; aucune fausse urgence ; pas de concours ni tirage au sort ; rien de religieux ; pas de faux avis ni témoignage. Les phrases doivent être vraies : coursiers vérifiés, point de repère, photo du colis (preuve), prix affiché avant de valider, paiement mobile, suivi en direct, code de retrait et de livraison.",
     recents.length ? `Accroches déjà utilisées (n'en répète ni les mots ni l'idée, trouve un autre angle) :\n${recents.map((r) => "- " + r).join("\n")}` : "",
-    'Réponds UNIQUEMENT par un objet JSON valide : {"titre":"","scenes":[{"type":"accroche","lignes":["","","",""],"objet":"colis"}, ...]}',
+    'Réponds UNIQUEMENT par un objet JSON valide : {"titre":"","scenes":[{"type":"accroche","lignes":["","","",""],"objet":"colis"}, {"type":"ecran","lignes":["",""],"image":"envoi-depart","etapes":[{"zone":"commune","saisie":"Kaloum"},{"zone":"suivant"}]}, ...]}',
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -181,7 +226,9 @@ filmsRouter.post("/script", express.json({ limit: "64kb" }), async (req: Request
   const b = (req.body ?? {}) as Record<string, unknown>;
   const sujetId = court(b.sujet, 40);
   const format = ["9:16", "1:1", "16:9"].includes(String(b.format)) ? (String(b.format) as Film["format"]) : "9:16";
-  const fond = ["photo", "degrade", "uni", "motif"].includes(String(b.fond)) ? (String(b.fond) as Film["fond"]) : "photo";
+  let fond = ["photo", "degrade", "uni", "motif"].includes(String(b.fond)) ? (String(b.fond) as Film["fond"]) : "photo";
+  let variante = "";
+  if (String(b.fond) === "auto" || !b.fond) ({ fond, variante } = choisirFond(tous()));
   const preset = SUJETS.find((s) => s.id === sujetId);
   const libre = court(b.libre, 200);
   let titre = preset?.titre ?? libre ?? "Film";
@@ -219,7 +266,7 @@ filmsRouter.post("/script", express.json({ limit: "64kb" }), async (req: Request
     }
     scenes = ok;
   }
-  const film: Film = { id: `${Date.now().toString(36)}-${crypto.randomBytes(2).toString("hex")}`, date: new Date().toISOString(), sujet: sujetId || "libre", titre, format, fond, scenes, statut: "attente_voix", voix: false };
+  const film: Film = { id: `${Date.now().toString(36)}-${crypto.randomBytes(2).toString("hex")}`, date: new Date().toISOString(), sujet: sujetId || "libre", titre, format, fond, variante, graine: crypto.randomBytes(4).toString("hex"), scenes, statut: "attente_voix", voix: false };
   ecrire(film);
   res.json({ ok: true, film: { ...film, texte: texteVoix(film.scenes) } });
 });
@@ -261,7 +308,7 @@ export const filmsMachineRouter = express.Router();
 filmsMachineRouter.get("/a-produire", (_req, res) => {
   res.set("Cache-Control", "no-store");
   dernierPassagePc = Date.now();
-  res.json({ ok: true, films: tous().filter((f) => f.statut === "a_produire").map((f) => ({ id: f.id, titre: f.titre, format: f.format, fond: f.fond, scenes: f.scenes })) });
+  res.json({ ok: true, films: tous().filter((f) => f.statut === "a_produire").map((f) => ({ id: f.id, titre: f.titre, format: f.format, fond: f.fond, variante: f.variante ?? "", graine: f.graine ?? f.id, scenes: f.scenes })) });
 });
 filmsMachineRouter.get("/:id/voix", (req, res) => {
   const f = lire(String(req.params.id));
