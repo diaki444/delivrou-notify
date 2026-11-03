@@ -31,7 +31,14 @@ export interface Film {
   fichier?: string;
   erreur?: string;
   maj?: string;
+  /** Avancement de la fabrication, renvoye par le PC. */
+  progression?: number;
+  etape?: string;
+  restantS?: number | null;
+  debutProd?: string;
 }
+/** Derniere fois que le PC de fabrication est venu regarder le QG (memoire du serveur). */
+let dernierPassagePc = 0;
 
 const dossier = (id: string) => path.join(FILMS_DIR, id.replace(/[^a-z0-9-]/gi, ""));
 const lire = (id: string): Film | null => {
@@ -157,7 +164,7 @@ export const filmsRouter = express.Router();
 
 filmsRouter.get("/", (_req, res) => {
   res.set("Cache-Control", "no-store");
-  res.json({ ok: true, films: tous().map((f) => ({ ...f, texte: texteVoix(f.scenes) })), sujets: SUJETS, ia: isGeminiConfigured() });
+  res.json({ ok: true, films: tous().map((f) => ({ ...f, texte: texteVoix(f.scenes) })), sujets: SUJETS, ia: isGeminiConfigured(), pcVuIlYA: dernierPassagePc ? Math.round((Date.now() - dernierPassagePc) / 1000) : null });
 });
 
 /** Ecrit le script d'un nouveau film (le sujet « colis » reprend le texte valide). */
@@ -244,6 +251,7 @@ export const filmsMachineRouter = express.Router();
 
 filmsMachineRouter.get("/a-produire", (_req, res) => {
   res.set("Cache-Control", "no-store");
+  dernierPassagePc = Date.now();
   res.json({ ok: true, films: tous().filter((f) => f.statut === "a_produire").map((f) => ({ id: f.id, titre: f.titre, format: f.format, fond: f.fond, scenes: f.scenes })) });
 });
 filmsMachineRouter.get("/:id/voix", (req, res) => {
@@ -259,8 +267,24 @@ filmsMachineRouter.post("/:id/statut", express.json({ limit: "16kb" }), (req: Re
   const st = String(b.statut);
   if (!["en_production", "pret", "echec"].includes(st)) { res.status(400).json({ ok: false }); return; }
   f.statut = st as Statut;
+  dernierPassagePc = Date.now();
+  if (st === "en_production") { f.debutProd = new Date().toISOString(); f.progression = 0; f.etape = "Démarrage"; f.restantS = null; }
+  if (st === "pret") { f.progression = 100; f.etape = "Terminé"; f.restantS = 0; }
   if (st === "pret") { f.fichier = `films/${f.id}/film.mp4`; delete f.erreur; }
   if (st === "echec") f.erreur = court(b.erreur, 300);
+  ecrire(f);
+  res.json({ ok: true });
+});
+
+/** Avancement en direct : pourcentage, etape et temps restant estime. */
+filmsMachineRouter.post("/:id/progression", express.json({ limit: "8kb" }), (req: Request, res: Response) => {
+  const f = lire(String(req.params.id));
+  if (!f) { res.status(404).json({ ok: false }); return; }
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  dernierPassagePc = Date.now();
+  f.progression = Math.max(0, Math.min(100, Math.round(Number(b.pct) || 0)));
+  f.etape = court(b.etape, 80);
+  f.restantS = b.restantS === null || b.restantS === undefined ? null : Math.max(0, Math.round(Number(b.restantS) || 0));
   ecrire(f);
   res.json({ ok: true });
 });
