@@ -81,6 +81,13 @@ export const SUJETS: Array<{ id: string; titre: string; note: string }> = [
   { id: "libre", titre: "Autre sujet (je le décris)", note: "Décris l'idée en une phrase." },
 ];
 
+/** Scènes qui ont un sens pour chaque sujet (le code de livraison et le livreur ne vont pas dans un film sur le parrainage). */
+const SCENES_PERMISES: Record<string, string[]> = {
+  points: ["bulles", "champ", "carte", "paiement"],
+  emballage: ["bulles", "champ", "carte"],
+  suivi: ["bulles", "champ", "livreur", "code"],
+  libre: ["bulles", "champ", "carte", "paiement", "livreur", "code"],
+};
 const PRESET_COLIS: Scene[] = [
   { type: "accroche", lignes: ["À Conakry,", "personne n'a d'adresse.", "Alors,", "comment on envoie un colis ?"], split: 2, objet: "colis", fond: "rue", sousTitres: false },
   { type: "bulles", lignes: ["Avant, c'étaient des appels, des explications…", "et un livreur qui tourne en rond."], fond: "quartier", etiquette: "AVANT", messages: [{ de: "in", texte: "Tu es où ?" }, { de: "out", texte: "Près du marché…" }, { de: "in", texte: "Quel marché ?" }, { de: "out", texte: "Je suis devant." }, { de: "in", texte: "Devant quoi ?" }], appel: "Appel manqué", objet: "scooter", symbole: "?" },
@@ -94,14 +101,14 @@ const PRESET_COLIS: Scene[] = [
 
 // ───────────── Validation d'un script ecrit par l'IA ─────────────
 const court = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
-function nettoyer(brut: unknown): { scenes: Scene[]; erreurs: string[] } {
+function nettoyer(brut: unknown, permises: string[] = Object.keys(NB_LIGNES)): { scenes: Scene[]; erreurs: string[] } {
   const erreurs: string[] = [];
   const arr = Array.isArray(brut) ? brut : [];
   const scenes: Scene[] = [];
   const vus = new Set<string>();
   for (const x of arr as Array<Record<string, unknown>>) {
     const type = String(x?.type ?? "");
-    if (!NB_LIGNES[type] || type === "fin" || vus.has(type)) continue;
+    if (!NB_LIGNES[type] || type === "fin" || vus.has(type) || (type !== "accroche" && !permises.includes(type))) continue;
     vus.add(type);
     const s: Scene = { ...x, type, lignes: (Array.isArray(x.lignes) ? x.lignes : []).map((l) => court(l, 70)).filter(Boolean) };
     if (s.objet !== undefined && !OBJETS.includes(String(s.objet))) s.objet = "colis";
@@ -110,7 +117,8 @@ function nettoyer(brut: unknown): { scenes: Scene[]; erreurs: string[] } {
     if (type === "bulles") s.messages = (Array.isArray(x.messages) ? x.messages : []).slice(0, 5).map((m) => ({ de: (m as Record<string, unknown>)?.de === "out" ? "out" : "in", texte: court((m as Record<string, unknown>)?.texte, 22) }));
     if (type === "livreur" && !PERSOS.includes(String(s.persona))) s.persona = "per-livreur2";
     if (type === "code") {
-      s.chiffres = (Array.isArray(x.chiffres) ? x.chiffres : ["4", "8", "2", "7"]).slice(0, 4).map((c) => String(c).slice(0, 1));
+      s.etiquette = "CODE DE LIVRAISON";
+      s.chiffres = ["4", "8", "2", "7"]; // exemple de code : jamais un chiffre qui ressemble à un montant
       const pe = (x.personne ?? {}) as Record<string, unknown>;
       s.personne = { image: PERSOS.includes(String(pe.image)) ? pe.image : "per-maman", texte: court(pe.texte, 34) };
     }
@@ -121,12 +129,13 @@ function nettoyer(brut: unknown): { scenes: Scene[]; erreurs: string[] } {
   return { scenes, erreurs };
 }
 
-function consigne(sujet: string, note: string, recents: string[]): string {
+function consigne(sujet: string, note: string, recents: string[], permises: string[]): string {
   return [
     "Tu écris le script d'un film court (35 à 45 secondes) pour Facebook et TikTok, pour Delivrou, service de livraison de COLIS à Conakry. Une voix off lit tout le texte ; l'image est du motion design.",
     `SUJET : ${sujet}. ${note}`,
     "Ton : tutoiement, français simple et chaleureux de Conakry, phrases courtes.",
-    "Le film suit une suite de scènes choisies parmi celles-ci (chacune une seule fois, 4 à 6 scènes au total, la première est toujours « accroche »). Chaque scène a un nombre EXACT de phrases de voix dans le champ lignes (une phrase ou un morceau de phrase par ligne, de 2 à 9 mots, la ponctuation reste dans la ligne) :",
+    `Scènes autorisées pour CE sujet (et seulement celles-là, en plus de « accroche ») : ${permises.join(", ")}. Choisis les plus pertinentes ; n'utilise pas une scène si elle ne correspond pas au sujet.`,
+    "Le film suit une suite de scènes choisies parmi celles-ci (chacune une seule fois, 3 à 6 scènes au total, la première est toujours « accroche »). Chaque scène a un nombre EXACT de phrases de voix dans le champ lignes (une phrase ou un morceau de phrase par ligne, de 2 à 9 mots, la ponctuation reste dans la ligne) :",
     '• accroche (4 lignes) : l\'accroche. Lignes 1 et 2 = la première partie (ex. « À Conakry, » / « personne n\'a d\'adresse. »), lignes 3 et 4 = la question (ex. « Alors, » / « comment on envoie un colis ? »). Champs : objet (colis|repere|scooter|telephone|coche|bulle|bouclier|cloche|enveloppe).',
     '• bulles (2 lignes) : le « avant », des messages qui s\'empilent. Champs : etiquette (ex. "AVANT"), messages (exactement 5 {de:"in"|"out", texte ≤ 22 caractères}), appel (ex. "Appel manqué"), objet, symbole ("?").',
     '• champ (5 lignes si 3 puces) : un champ de formulaire qui se remplit, puis 3 puces cochées une par ligne (lignes 3, 4, 5). Champs : titre, label (en MAJUSCULES, ex. "POINT DE REPÈRE DÉPART *"), valeur (≤ 24 caractères), aide (≤ 60), puces (3 {texte ≤ 22, vignette: th-marche|th-ville|th-rue}).',
@@ -192,10 +201,10 @@ filmsRouter.post("/script", express.json({ limit: "64kb" }), async (req: Request
     let ok: Scene[] | null = null;
     let dernier = "";
     for (let essai = 0; essai < 3 && !ok; essai++) {
-      const r = await askGeminiEmail(consigne(sujetId === "libre" ? libre : (preset?.titre ?? libre), preset?.note ?? "", recents));
+      const r = await askGeminiEmail(consigne(sujetId === "libre" ? libre : (preset?.titre ?? libre), preset?.note ?? "", recents, SCENES_PERMISES[sujetId] ?? SCENES_PERMISES.libre));
       const o = r.ok && r.text ? extraire(r.text) : null;
       if (!o) { dernier = r.error || "Réponse illisible."; continue; }
-      const { scenes: sc, erreurs } = nettoyer(o.scenes);
+      const { scenes: sc, erreurs } = nettoyer(o.scenes, SCENES_PERMISES[sujetId] ?? SCENES_PERMISES.libre);
       if (sc.length < 3 || sc[0].type !== "accroche") { dernier = erreurs[0] || "Il faut au moins 3 scènes et une accroche."; continue; }
       const textes = JSON.stringify(sc.map((s) => ({ ...s, type: undefined })));
       const alertes = verifierRegles(textes);
