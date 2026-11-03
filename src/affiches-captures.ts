@@ -16,6 +16,7 @@ interface Job {
   format: "4:5" | "9:16";
   statut: "a_produire" | "en_production" | "pret" | "echec";
   fichier?: string;
+  fichier2?: string;
   titre?: string;
   sujet?: string;
   layout?: string;
@@ -48,7 +49,11 @@ affichesCapturesRouter.post("/demander", express.json({ limit: "4kb" }), (req: R
 });
 affichesCapturesRouter.post("/:id/supprimer", (req: Request, res: Response) => {
   const id = String(req.params.id);
-  try { fs.rmSync(chemin(id), { force: true }); fs.rmSync(path.join(AUTH_DIR, "qg", "affiches-captures", id.replace(/[^a-z0-9-]/gi, "") + ".png"), { force: true }); } catch { /* deja supprime */ }
+  try {
+    const sid = id.replace(/[^a-z0-9-]/gi, "");
+    fs.rmSync(chemin(id), { force: true });
+    for (const n of [sid + ".png", sid + "-tiktok.png"]) fs.rmSync(path.join(AUTH_DIR, "qg", "affiches-captures", n), { force: true });
+  } catch { /* deja supprime */ }
   res.json({ ok: true });
 });
 
@@ -68,7 +73,7 @@ affichesMachineRouter.post("/:id/statut", express.json({ limit: "8kb" }), (req: 
   const c = (v: unknown, n: number) => String(v ?? "").slice(0, n);
   j.statut = st as Job["statut"];
   dernierPassagePc = Date.now();
-  if (st === "pret") { j.fichier = c(b.fichier, 120); j.titre = c(b.titre, 120); j.sujet = c(b.sujet, 20); j.layout = c(b.layout, 20); j.fond = c(b.fond, 20); delete j.erreur; }
+  if (st === "pret") { j.fichier = c(b.fichier, 120); j.fichier2 = c(b.fichier2, 120) || undefined; j.titre = c(b.titre, 120); j.sujet = c(b.sujet, 20); j.layout = c(b.layout, 20); j.fond = c(b.fond, 20); delete j.erreur; }
   if (st === "echec") j.erreur = c(b.erreur, 200);
   ecrire(j);
   res.json({ ok: true });
