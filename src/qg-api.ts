@@ -59,7 +59,7 @@ import {
 import { filmsRouter } from "./films.js";
 import { affichesCapturesRouter } from "./affiches-captures.js";
 import { commentairesRouter } from "./qg-commentaires.js";
-import { programmer, lister, verifierDemande, type DemandeProgrammation } from "./zernio-publish.js";
+import { programmer, lister, annuler, verifierDemande, type DemandeProgrammation } from "./zernio-publish.js";
 import { otpSecuritySummary } from "./otp.js";
 import { responseStats, pendingChats } from "./metrics.js";
 import { addProspects, listChats as listChatsForCount, isChatUnread as unread } from "./store.js";
@@ -445,6 +445,14 @@ qgApiRouter.post("/programmer", async (req, res) => {
   }
   const resultats = await programmer(d);
   res.status(resultats.every((r) => r.ok) ? 200 : 502).json({ ok: resultats.every((r) => r.ok), resultats });
+});
+
+/** Annule les programmations pas encore publiees d'un post (supprimer depuis le calendrier). */
+qgApiRouter.post("/programmer/annuler", async (req, res) => {
+  const id = String((req.body as Record<string, unknown> | undefined)?.id ?? "");
+  if (!id) { res.status(400).json({ ok: false, error: "Post inconnu" }); return; }
+  const r = await annuler(id);
+  res.status(r.ok ? 200 : 502).json(r.ok ? r : { ok: false, error: r.erreur });
 });
 
 /** Etat reel (programme, publie, echec) des posts envoyes depuis le QG. */

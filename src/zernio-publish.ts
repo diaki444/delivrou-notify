@@ -167,19 +167,42 @@ export interface PostProgramme {
   statut: string;
   quand: string | null;
   url: string | null;
+  texte: string;
+  media: string | null;
+  mediaType: "image" | "video";
+}
+
+/** Annule chez Zernio les programmations pas encore publiees d'un post du QG. Un post deja publie reste en ligne. */
+export async function annuler(qgId: string): Promise<{ ok: true; annules: number; publies: number } | { ok: false; erreur: string }> {
+  const l = await lister();
+  if (!l.ok) return l;
+  let annules = 0;
+  let publies = 0;
+  for (const p of l.posts) {
+    if (p.qgId !== qgId || !p.id) continue;
+    if (p.statutPost === "published") { publies++; continue; }
+    const r = await zernioRequest("DELETE", `/v1/posts/${encodeURIComponent(p.id)}`);
+    if (!r.ok) return { ok: false, erreur: r.error };
+    annules++;
+  }
+  return { ok: true, annules, publies };
 }
 
 /** Etat reel des posts envoyes par le QG, relu chez Zernio. */
 export async function lister(): Promise<{ ok: true; posts: PostProgramme[] } | { ok: false; erreur: string }> {
   const depuis = new Date(Date.now() - 14 * 86400_000).toISOString().slice(0, 10);
-  const r = await zernioRequest<{ posts?: Array<Record<string, unknown>> }>("GET", `/v1/posts?limit=100&fromDate=${depuis}&fields=status,scheduledFor,platforms,metadata`);
+  const r = await zernioRequest<{ posts?: Array<Record<string, unknown>> }>("GET", `/v1/posts?limit=100&fromDate=${depuis}&fields=status,scheduledFor,platforms,metadata,content,mediaItems`);
   if (!r.ok) return { ok: false, erreur: r.error };
   const posts: PostProgramme[] = [];
   for (const p of r.data?.posts ?? []) {
     const meta = (p.metadata ?? {}) as Record<string, unknown>;
     if (typeof meta.qgId !== "string") continue;
     const plat = Array.isArray(p.platforms) ? (p.platforms[0] as Record<string, unknown> | undefined) : undefined;
+    const m0 = Array.isArray(p.mediaItems) ? (p.mediaItems[0] as Record<string, unknown> | undefined) : undefined;
     posts.push({
+      texte: typeof p.content === "string" ? p.content : "",
+      media: typeof m0?.url === "string" ? m0.url : null,
+      mediaType: m0?.type === "video" ? "video" : "image",
       id: String(p._id ?? ""),
       statutPost: String(p.status ?? ""),
       qgId: meta.qgId,

@@ -450,6 +450,21 @@ filmsMachineRouter.get("/a-produire", (_req, res) => {
   dernierPassagePc = Date.now();
   res.json({ ok: true, films: tous().filter((f) => f.statut === "a_produire").map((f) => ({ id: f.id, titre: f.titre, format: f.format, fond: f.fond, variante: f.variante ?? "", graine: f.graine ?? f.id, scenes: f.scenes })) });
 });
+/** Une video deja faite ailleurs (le fichier est deja envoye sous films/<id>/film.mp4) : elle arrive dans la liste, prete a programmer. */
+filmsMachineRouter.post("/importer", express.json({ limit: "16kb" }), (req: Request, res: Response) => {
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const id = String(b.id ?? "").replace(/[^a-z0-9-]/gi, "").slice(0, 40);
+  const fichier = path.join(dossier(id), "film.mp4");
+  if (!id || !fs.existsSync(fichier)) { res.status(400).json({ ok: false, erreur: "Envoie d'abord le fichier vidéo." }); return; }
+  const format = b.format === "1:1" || b.format === "16:9" ? b.format : "9:16";
+  const f: Film = {
+    id, date: new Date().toISOString(), sujet: court(b.sujet, 200) || court(b.titre, 120), titre: court(b.titre, 120) || "Vidéo importée",
+    format, fond: "photo", scenes: [], statut: "pret", voix: true, fichier: `films/${id}/film.mp4`, progression: 100, etape: "Terminé", restantS: 0, maj: new Date().toISOString(),
+  };
+  if (Number(b.duree) > 0) f.duree = Math.round(Number(b.duree));
+  ecrire(f);
+  res.json({ ok: true, id });
+});
 filmsMachineRouter.get("/:id/voix", (req, res) => {
   const f = lire(String(req.params.id));
   const p = f ? path.join(dossier(f.id), "voix.mp3") : "";

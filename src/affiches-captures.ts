@@ -14,7 +14,7 @@ const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth
 const DIR = path.join(AUTH_DIR, "qg", "affiches-captures-jobs");
 const CATALOGUE = path.join(AUTH_DIR, "qg", "affiches-catalogue.json");
 
-interface Reglages { sujet?: string; layout?: string; fond?: string; titre?: string; sous?: string }
+interface Reglages { sujet?: string; layout?: string; fond?: string; perso?: string; titre?: string; sous?: string }
 interface Job {
   id: string;
   date: string;
@@ -27,6 +27,7 @@ interface Job {
   sujet?: string;
   layout?: string;
   fond?: string;
+  perso?: string;
   erreur?: string;
   reglages?: Reglages;
   legendes?: Legs;
@@ -46,7 +47,7 @@ let dernierPassagePc = 0;
 function nettoyerReglages(b: unknown): Reglages | { erreur: string } {
   const o = (b ?? {}) as Record<string, unknown>;
   const r: Reglages = {};
-  for (const [k, n] of [["sujet", 20], ["layout", 20], ["fond", 20], ["titre", 80], ["sous", 120]] as const) if (c(o[k], n)) r[k] = c(o[k], n);
+  for (const [k, n] of [["sujet", 20], ["layout", 20], ["fond", 20], ["perso", 24], ["titre", 80], ["sous", 120]] as const) if (c(o[k], n)) r[k] = c(o[k], n);
   const alertes = verifierRegles(r.titre ?? "", r.sous ?? "");
   if (alertes.length) return { erreur: alertes[0] };
   return r;
@@ -129,14 +130,14 @@ export const affichesMachineRouter = express.Router();
 affichesMachineRouter.get("/a-produire", (_req, res) => {
   res.set("Cache-Control", "no-store");
   dernierPassagePc = Date.now();
-  const recents = tous().filter((j) => j.statut === "pret").slice(0, 12).map((j) => ({ sujet: j.sujet, layout: j.layout, fond: j.fond }));
+  const recents = tous().filter((j) => j.statut === "pret").slice(0, 12).map((j) => ({ sujet: j.sujet, layout: j.layout, fond: j.fond, perso: j.perso }));
   res.json({ ok: true, jobs: tous().filter((j) => j.statut === "a_produire").map((j) => ({ id: j.id, format: j.format, reglages: j.reglages ?? null, recents })) });
 });
 /** Le PC publie la liste de ses sujets, mises en page et fonds : le QG s'en sert pour les menus « Corriger ». */
 affichesMachineRouter.post("/catalogue", express.json({ limit: "32kb" }), (req: Request, res: Response) => {
   const b = (req.body ?? {}) as Record<string, unknown>;
   const l = (v: unknown) => (Array.isArray(v) ? v : []).slice(0, 40);
-  const sujets = l(b.sujets).map((x) => ({ id: c((x as Record<string, unknown>)?.id, 20), titre: c((x as Record<string, unknown>)?.titre, 90), sous: c((x as Record<string, unknown>)?.sous, 140), layouts: l((x as Record<string, unknown>)?.layouts).map((y) => c(y, 20)) }));
+  const sujets = l(b.sujets).map((x) => ({ id: c((x as Record<string, unknown>)?.id, 20), titre: c((x as Record<string, unknown>)?.titre, 90), sous: c((x as Record<string, unknown>)?.sous, 140), layouts: l((x as Record<string, unknown>)?.layouts).map((y) => c(y, 20)), persos: l((x as Record<string, unknown>)?.persos).map((y) => c(y, 24)) }));
   const cat = { sujets, layouts: l(b.layouts).map((x) => c(x, 20)), fonds: l(b.fonds).map((x) => c(x, 20)) };
   fs.mkdirSync(path.dirname(CATALOGUE), { recursive: true });
   fs.writeFileSync(CATALOGUE, JSON.stringify(cat));
@@ -151,7 +152,7 @@ affichesMachineRouter.post("/:id/statut", express.json({ limit: "8kb" }), (req: 
   if (!["en_production", "pret", "echec"].includes(st)) { res.status(400).json({ ok: false }); return; }
   j.statut = st as Job["statut"];
   dernierPassagePc = Date.now();
-  if (st === "pret") { j.fichier = c(b.fichier, 120); j.fichier2 = c(b.fichier2, 120) || undefined; j.titre = c(b.titre, 120); j.texte = c(b.texte, 400); j.sujet = c(b.sujet, 20); j.layout = c(b.layout, 20); j.fond = c(b.fond, 20); delete j.erreur; }
+  if (st === "pret") { j.fichier = c(b.fichier, 120); j.fichier2 = c(b.fichier2, 120) || undefined; j.titre = c(b.titre, 120); j.texte = c(b.texte, 400); j.sujet = c(b.sujet, 20); j.layout = c(b.layout, 20); j.fond = c(b.fond, 20); j.perso = c(b.perso, 24) || undefined; delete j.erreur; }
   if (st === "echec") j.erreur = c(b.erreur, 200);
   ecrire(j);
   res.json({ ok: true });
