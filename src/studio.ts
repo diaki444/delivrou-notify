@@ -280,7 +280,7 @@ function devinerPilier(e: Pick<Entree, "titre" | "sous" | "idee">): string {
   if (/famille|repère|repere|conakry|embouteill/.test(t)) return "Vie de Conakry";
   return "Appel à l'action";
 }
-function legendes(e: Pick<Entree, "id" | "titre" | "sous" | "idee" | "pilier">, pilier?: string): Legendes {
+export function legendes(e: Pick<Entree, "id" | "titre" | "sous" | "idee" | "pilier">, pilier?: string): Legendes {
   const p = pilier && PILIERS.includes(pilier) ? pilier : e.pilier && PILIERS.includes(e.pilier) ? e.pilier : devinerPilier(e);
   const seed = hash(e.id || e.idee || "x");
   const accroche = (e.titre || "Delivrou, vite fait.").trim();

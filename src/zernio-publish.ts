@@ -50,7 +50,7 @@ const MIME: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg"
 function resoudreFichier(rel: string): string | null {
   const clean = path.posix.normalize(String(rel).replace(/\\/g, "/"));
   if (!clean || clean.startsWith("/") || clean.includes("..")) return null;
-  if (!clean.startsWith("media/") && !clean.startsWith("studio/creations/")) return null;
+  if (!["media/", "studio/creations/", "films/", "affiches-captures/"].some((p) => clean.startsWith(p))) return null;
   const full = path.resolve(QG_DIR, clean);
   if (!full.startsWith(path.resolve(QG_DIR) + path.sep)) return null;
   return fs.existsSync(full) && fs.statSync(full).isFile() ? full : null;

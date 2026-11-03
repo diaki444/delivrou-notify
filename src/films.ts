@@ -11,7 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import express, { type Request, type Response } from "express";
 import { askGeminiEmail, isGeminiConfigured } from "./gemini.js";
-import { verifierRegles, tropProche } from "./studio.js";
+import { verifierRegles, tropProche, legendes } from "./studio.js";
 
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
 const FILMS_DIR = path.join(AUTH_DIR, "qg", "films");
@@ -282,6 +282,62 @@ filmsRouter.put("/:id/voix", express.raw({ type: "*/*", limit: "30mb" }), (req: 
   delete f.erreur;
   ecrire(f);
   res.json({ ok: true });
+});
+
+/** Legendes Facebook / TikTok du film (accroche, question, hashtags), pour la programmation. */
+filmsRouter.get("/:id/legendes", (req: Request, res: Response) => {
+  const f = lire(String(req.params.id));
+  if (!f) { res.status(404).json({ ok: false, erreur: "Film inconnu" }); return; }
+  const l = legendes({ id: f.id, titre: f.titre, sous: f.scenes[0]?.lignes.join(" ") ?? "", idee: texteVoix(f.scenes), pilier: undefined });
+  res.json({ ok: true, facebook: l.facebook, tiktok: l.tiktok });
+});
+
+/**
+ * Retouche un film termine.
+ * - sans consigne : meme script et meme voix, nouveau fond (ou fond / format demande) : refabrique direct ;
+ * - avec consigne : l'IA reecrit le script, il faut une nouvelle voix.
+ */
+filmsRouter.post("/:id/refaire", express.json({ limit: "8kb" }), async (req: Request, res: Response) => {
+  const f = lire(String(req.params.id));
+  if (!f) { res.status(404).json({ ok: false, erreur: "Film inconnu" }); return; }
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const demande = court(b.consigne, 400);
+  const format = ["9:16", "1:1", "16:9"].includes(String(b.format)) ? (String(b.format) as Film["format"]) : f.format;
+  let { fond, variante } = choisirFond(tous());
+  if (["photo", "degrade", "uni", "motif"].includes(String(b.fond))) { fond = String(b.fond) as Film["fond"]; variante = ""; }
+  const id = `${Date.now().toString(36)}-${crypto.randomBytes(2).toString("hex")}`;
+  const base: Film = { id, date: new Date().toISOString(), sujet: f.sujet, titre: f.titre, format, fond, variante, graine: crypto.randomBytes(4).toString("hex"), scenes: f.scenes, statut: "attente_voix", voix: false };
+  if (!demande) {
+    fs.mkdirSync(dossier(id), { recursive: true });
+    const v = path.join(dossier(f.id), "voix.mp3");
+    if (!fs.existsSync(v)) { res.status(400).json({ ok: false, erreur: "Ce film n'a pas de voix." }); return; }
+    fs.copyFileSync(v, path.join(dossier(id), "voix.mp3"));
+    base.voix = true;
+    base.statut = "a_produire";
+    ecrire(base);
+    res.json({ ok: true, film: base, ia: false });
+    return;
+  }
+  if (!isGeminiConfigured()) { res.status(503).json({ ok: false, erreur: "L'IA n'est pas configurée sur le serveur." }); return; }
+  const permises = SCENES_PERMISES[f.sujet] ?? SCENES_PERMISES.libre;
+  const note = `MODIFIE un script existant selon cette demande de l'équipe : « ${demande} ». Script actuel (JSON) : ${JSON.stringify(f.scenes.map((s) => ({ ...s, type: s.type })))}. Garde ce qui n'est pas concerné par la demande.`;
+  let ok: Scene[] | null = null;
+  let dernier = "";
+  for (let essai = 0; essai < 3 && !ok; essai++) {
+    const r = await askGeminiEmail(consigne(f.titre, note, [], permises));
+    const o = r.ok && r.text ? extraire(r.text) : null;
+    if (!o) { dernier = r.error || "Réponse illisible."; continue; }
+    const { scenes: sc, erreurs } = nettoyer(o.scenes, permises);
+    if (sc.length < 3 || sc[0].type !== "accroche") { dernier = erreurs[0] || "Il faut au moins 3 scènes et une accroche."; continue; }
+    const alertes = verifierRegles(JSON.stringify(sc.map((s) => ({ ...s, type: undefined }))));
+    if (alertes.length) { dernier = alertes[0]; continue; }
+    ok = [...sc, FINALE];
+    base.titre = court(o.titre, 80) || f.titre;
+  }
+  if (!ok) { res.status(422).json({ ok: false, erreur: "La modification n'a pas pu être écrite : " + dernier }); return; }
+  base.scenes = ok;
+  ecrire(base);
+  res.json({ ok: true, film: { ...base, texte: texteVoix(base.scenes) }, ia: true });
 });
 
 /** Demande la fabrication : le PC viendra le chercher. */
