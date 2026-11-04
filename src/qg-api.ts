@@ -60,7 +60,7 @@ import { filmsRouter } from "./films.js";
 import { affichesCapturesRouter } from "./affiches-captures.js";
 import { commentairesRouter } from "./qg-commentaires.js";
 import { declencheursRouter } from "./declencheurs.js";
-import { programmer, lister, annuler, verifierDemande, statistiquesPost, type DemandeProgrammation } from "./zernio-publish.js";
+import { programmer, lister, annuler, modifierHoraire, verifierDemande, statistiquesPost, type DemandeProgrammation } from "./zernio-publish.js";
 import { otpSecuritySummary } from "./otp.js";
 import { responseStats, pendingChats } from "./metrics.js";
 import { addProspects, listChats as listChatsForCount, isChatUnread as unread } from "./store.js";
@@ -433,7 +433,7 @@ qgApiRouter.post("/programmer", async (req, res) => {
     tiktokFile: str(b.tiktokFile) || null,
     facebook: str(b.facebook),
     tiktok: str(b.tiktok),
-    tiktokMode: b.tiktokMode === "direct" ? "direct" : "brouillon",
+    tiktokMode: b.tiktokMode === "brouillon" ? "brouillon" : "direct",
   };
   if (!d.id) {
     res.status(400).json({ ok: false, error: "Post inconnu" });
@@ -446,6 +446,19 @@ qgApiRouter.post("/programmer", async (req, res) => {
   }
   const resultats = await programmer(d);
   res.status(resultats.every((r) => r.ok) ? 200 : 502).json({ ok: resultats.every((r) => r.ok), resultats });
+});
+
+/** Change la date et l'heure d'un post deja programme chez Zernio (sans le recreer). */
+qgApiRouter.post("/programmer/modifier", async (req, res) => {
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const id = String(b.id ?? "");
+  const date = String(b.date ?? "");
+  const heure = String(b.heure ?? "");
+  if (!id) { res.status(400).json({ ok: false, error: "Post inconnu" }); return; }
+  const err = verifierDemande({ id, date, heure, reseaux: ["fb"], type: "image", facebookFile: null, tiktokFile: null, facebook: "", tiktok: "", tiktokMode: "direct" });
+  if (err) { res.status(400).json({ ok: false, error: err }); return; }
+  const r = await modifierHoraire(id, date, heure);
+  res.status(r.ok ? 200 : 502).json(r.ok ? r : { ok: false, error: r.erreur });
 });
 
 /** Annule les programmations pas encore publiees d'un post (supprimer depuis le calendrier). */

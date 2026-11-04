@@ -178,6 +178,14 @@ function nettoyer(brut: unknown, permises: string[] = Object.keys(NB_LIGNES)): {
   return { scenes, erreurs };
 }
 
+/** Accroche molle : politesse, ou premiere ligne trop longue pour arreter le pouce en 2 secondes. */
+function accrocheFaible(l: string[]): string | null {
+  const premiere = (l[0] ?? "").trim();
+  if (/^(salut|bonjour|bonsoir|bienvenue|d[ée]couvrez|hello|coucou|aujourd)/i.test(premiere)) return "Accroche trop molle (politesse).";
+  if (premiere.split(/\s+/).length > 8) return "Première ligne de l'accroche trop longue.";
+  return null;
+}
+
 /** Tons proposes dans le QG : consigne pour l'IA + conseil de reglage ElevenLabs. */
 export const TONS: Record<string, { nom: string; ia: string; voix: string }> = {
   chaleureux: { nom: "Chaleureux", ia: "chaleureux et rassurant, comme un grand frère de confiance", voix: "Voix posée et souriante. Stabilité ≈ 50 %." },
@@ -196,7 +204,8 @@ function consigne(sujet: string, note: string, recents: string[], permises: stri
     `Tu écris le script d'un film court d'environ ${duree} secondes de voix (environ ${mots} mots en tout, toutes les lignes confondues) pour Facebook et TikTok, pour Delivrou, service de livraison de COLIS à Conakry. Une voix off lit tout le texte ; l'image est du motion design.`,
     `SUJET : ${sujet}. ${note}`,
     `TON DU FILM : ${t.ia}. Ce ton se sent dès la première ligne et jusqu'au bout. Tutoiement, français simple de Conakry, phrases courtes.`,
-    "HOOK PARFAIT (le plus important) : les 3 premières secondes (scène accroche) doivent arrêter le pouce. Une vraie situation vécue, une question qui pique, une contradiction ou une petite blague, dans le ton choisi. Jamais « Salut », « Bonjour », « Bienvenue », « Découvrez », ni un slogan. L'accroche doit donner envie de connaître la suite.",
+    "HOOK PARFAIT (le plus important) : les 3 premières secondes (scène accroche) doivent arrêter le pouce. Une vraie situation vécue, une question qui pique, une contradiction ou une petite blague, dans le ton choisi. Jamais « Salut », « Bonjour », « Bienvenue », « Découvrez », ni un slogan. L'accroche doit donner envie de connaître la suite. Règles de l'accroche : la 1re ligne fait 6 mots maximum et claque (un fait surprenant, une scène du quotidien à Conakry, une erreur que tout le monde fait, une question directe) ; la 2e ligne enfonce le clou ; les lignes 3 et 4 ouvrent une boucle (une question ou une promesse) dont la réponse arrive plus loin dans le film, pour que la personne reste. Pas de politesse, pas de présentation de Delivrou dans l'accroche.",
+    "FIN PARFAITE : la dernière scène avant « fin » est la chute : une phrase courte et mémorable qui répond à la question de l'accroche (le bénéfice concret ou une punchline), jamais une phrase molle ou un résumé. Elle prépare l'appel à commenter un mot-clé qui suit automatiquement. Le film doit se terminer sur une envie d'agir, pas sur un silence.",
     `Scènes autorisées pour CE sujet (et seulement celles-là, en plus de « accroche ») : ${permises.join(", ")}. Choisis les plus pertinentes ; n'utilise pas une scène si elle ne correspond pas au sujet. Les captures d'écran de l'appli (scène « ecran ») sont préférées aux dessins quand elles illustrent le sujet.`,
     `Le film suit une suite de scènes choisies parmi celles-ci (chacune une seule fois sauf « ecran », ${nbScenes} scènes au total, la première est toujours « accroche »). Chaque scène a un nombre EXACT de phrases de voix dans le champ lignes (une phrase ou un morceau de phrase par ligne, de 2 à 9 mots, la ponctuation reste dans la ligne) :`,
     '• accroche (4 lignes) : l\'accroche. Lignes 1 et 2 = la première partie (ex. « À Conakry, » / « personne n\'a d\'adresse. »), lignes 3 et 4 = la question (ex. « Alors, » / « comment on envoie un colis ? »). Champs : objet (colis|repere|scooter|telephone|coche|bulle|bouclier|cloche|enveloppe).',
@@ -275,6 +284,7 @@ filmsRouter.post("/script", express.json({ limit: "64kb" }), async (req: Request
       if (!o) { dernier = r.error || "Réponse illisible."; continue; }
       const { scenes: sc, erreurs } = nettoyer(o.scenes, SCENES_PERMISES[sujetId] ?? SCENES_PERMISES.libre);
       if (sc.length < 3 || sc[0].type !== "accroche") { dernier = erreurs[0] || "Il faut au moins 3 scènes et une accroche."; continue; }
+      { const faible = accrocheFaible(sc[0].lignes); if (faible) { dernier = faible; continue; } }
       const textes = JSON.stringify(sc.map((s) => ({ ...s, type: undefined })));
       const alertes = verifierRegles(textes);
       if (alertes.length) { dernier = alertes[0]; continue; }
@@ -416,6 +426,7 @@ filmsRouter.post("/:id/refaire", express.json({ limit: "8kb" }), async (req: Req
     if (!o) { dernier = r.error || "Réponse illisible."; continue; }
     const { scenes: sc, erreurs } = nettoyer(o.scenes, permises);
     if (sc.length < 3 || sc[0].type !== "accroche") { dernier = erreurs[0] || "Il faut au moins 3 scènes et une accroche."; continue; }
+    { const faible = accrocheFaible(sc[0].lignes); if (faible) { dernier = faible; continue; } }
     const alertes = verifierRegles(JSON.stringify(sc.map((s) => ({ ...s, type: undefined }))));
     if (alertes.length) { dernier = alertes[0]; continue; }
     ok = [...sc, FINALE];

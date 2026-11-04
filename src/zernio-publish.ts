@@ -172,6 +172,21 @@ export interface PostProgramme {
   mediaType: "image" | "video";
 }
 
+/** Change la date et l'heure des programmations pas encore publiees d'un post du QG. */
+export async function modifierHoraire(qgId: string, date: string, heure: string): Promise<{ ok: true; modifies: number } | { ok: false; erreur: string }> {
+  const l = await lister();
+  if (!l.ok) return l;
+  let modifies = 0;
+  for (const p of l.posts) {
+    if (p.qgId !== qgId || !p.id || p.statutPost === "published" || p.statutPost === "cancelled") continue;
+    const r = await zernioRequest("PUT", `/v1/posts/${encodeURIComponent(p.id)}`, { scheduledFor: `${date}T${heure}:00Z`, timezone: TIMEZONE });
+    if (!r.ok) return { ok: false, erreur: r.error };
+    modifies++;
+  }
+  if (!modifies) return { ok: false, erreur: "Aucune programmation a modifier : deja publie ou introuvable chez Zernio." };
+  return { ok: true, modifies };
+}
+
 /** Annule chez Zernio les programmations pas encore publiees d'un post du QG. Un post deja publie reste en ligne. */
 export async function annuler(qgId: string): Promise<{ ok: true; annules: number; publies: number } | { ok: false; erreur: string }> {
   const l = await lister();
