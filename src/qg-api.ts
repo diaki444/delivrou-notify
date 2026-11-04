@@ -59,7 +59,7 @@ import {
 import { filmsRouter } from "./films.js";
 import { affichesCapturesRouter } from "./affiches-captures.js";
 import { commentairesRouter } from "./qg-commentaires.js";
-import { programmer, lister, annuler, verifierDemande, type DemandeProgrammation } from "./zernio-publish.js";
+import { programmer, lister, annuler, verifierDemande, statistiquesPost, type DemandeProgrammation } from "./zernio-publish.js";
 import { otpSecuritySummary } from "./otp.js";
 import { responseStats, pendingChats } from "./metrics.js";
 import { addProspects, listChats as listChatsForCount, isChatUnread as unread } from "./store.js";
@@ -460,6 +460,15 @@ qgApiRouter.get("/programmer", async (_req, res) => {
   res.set("Cache-Control", "no-store");
   const r = await lister();
   res.status(r.ok ? 200 : 502).json(r.ok ? { ok: true, posts: r.posts } : { ok: false, error: r.erreur });
+});
+
+/** Vues, likes, commentaires et partages d'une publication (id Zernio du post). */
+qgApiRouter.get("/programmer/stats", async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const id = String(req.query.id ?? "").trim();
+  if (!/^[A-Za-z0-9_-]{6,64}$/.test(id)) { res.status(400).json({ ok: false, error: "Identifiant de publication invalide." }); return; }
+  const r = await statistiquesPost(id);
+  res.status(r.ok ? 200 : 502).json(r.ok ? { ok: true, stats: r.stats, attente: r.attente } : { ok: false, error: r.erreur });
 });
 
 /** Commentaires Facebook et TikTok : lire, proposer une reponse, envoyer apres validation. */

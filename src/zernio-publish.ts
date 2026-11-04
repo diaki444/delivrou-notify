@@ -214,3 +214,47 @@ export async function lister(): Promise<{ ok: true; posts: PostProgramme[] } | {
   }
   return { ok: true, posts };
 }
+
+/** Chiffres d'une publication (vues, likes, commentaires, partages...), relevés chez Zernio. */
+export interface StatsPost {
+  vues: number | null;
+  impressions: number | null;
+  portee: number | null;
+  likes: number | null;
+  commentaires: number | null;
+  partages: number | null;
+  enregistrements: number | null;
+  clics: number | null;
+  taux: number | null;
+  url: string | null;
+  maj: string | null;
+}
+
+const nb = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+/** Statistiques d'une publication, par son identifiant Zernio (GET /v1/analytics?postId=). */
+export async function statistiquesPost(postId: string): Promise<{ ok: true; stats: StatsPost; attente: boolean } | { ok: false; erreur: string }> {
+  const r = await zernioRequest<Record<string, unknown>>("GET", `/v1/analytics?postId=${encodeURIComponent(postId)}`);
+  if (!r.ok) {
+    return { ok: false, erreur: r.status === 402 ? "Les statistiques par publication demandent l'option Analytics de Zernio." : r.error };
+  }
+  const d = r.data ?? {};
+  const plateformes = Array.isArray(d.platformAnalytics) ? (d.platformAnalytics as Record<string, unknown>[]) : [];
+  const p = plateformes[0] ?? {};
+  const a = ((p.analytics && typeof p.analytics === "object" ? p.analytics : d.analytics) ?? {}) as Record<string, unknown>;
+  const stats: StatsPost = {
+    vues: nb(a.views),
+    impressions: nb(a.impressions),
+    portee: nb(a.reach),
+    likes: nb(a.likes),
+    commentaires: nb(a.comments),
+    partages: nb(a.shares),
+    enregistrements: nb(a.saves),
+    clics: nb(a.clicks),
+    taux: nb(a.engagementRate),
+    url: typeof p.platformPostUrl === "string" ? p.platformPostUrl : null,
+    maj: typeof a.lastUpdated === "string" ? a.lastUpdated : null,
+  };
+  const vide = Object.entries(stats).every(([k, v]) => k === "url" || k === "maj" || v === null);
+  return { ok: true, stats, attente: vide };
+}
