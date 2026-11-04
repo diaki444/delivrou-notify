@@ -14,7 +14,7 @@ const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth
 const DIR = path.join(AUTH_DIR, "qg", "affiches-captures-jobs");
 const CATALOGUE = path.join(AUTH_DIR, "qg", "affiches-catalogue.json");
 
-interface Reglages { sujet?: string; layout?: string; fond?: string; perso?: string; titre?: string; sous?: string }
+interface Reglages { sujet?: string; layout?: string; fond?: string; perso?: string; titre?: string; sous?: string; cta?: string }
 interface Job {
   id: string;
   date: string;
@@ -47,7 +47,7 @@ let dernierPassagePc = 0;
 function nettoyerReglages(b: unknown): Reglages | { erreur: string } {
   const o = (b ?? {}) as Record<string, unknown>;
   const r: Reglages = {};
-  for (const [k, n] of [["sujet", 20], ["layout", 20], ["fond", 20], ["perso", 24], ["titre", 80], ["sous", 120]] as const) if (c(o[k], n)) r[k] = c(o[k], n);
+  for (const [k, n] of [["sujet", 20], ["layout", 20], ["fond", 20], ["perso", 24], ["cta", 24], ["titre", 80], ["sous", 120]] as const) if (c(o[k], n)) r[k] = c(o[k], n);
   const alertes = verifierRegles(r.titre ?? "", r.sous ?? "");
   if (alertes.length) return { erreur: alertes[0] };
   return r;

@@ -288,6 +288,9 @@ filmsRouter.post("/script", express.json({ limit: "64kb" }), async (req: Request
     }
     scenes = ok;
   }
+  // Appel à l'action : la scène finale invite à commenter un mot-clé (la réponse part en message privé).
+  const mot = court(b.cta, 24).toUpperCase().replace(/[^A-Z0-9 ]/g, "").trim();
+  if (mot) scenes = scenes.map((s) => (s.type === "fin" ? { ...s, lignes: ["Delivrou,", "vite fait.", `Commente ${mot}`, "pour recevoir le lien."], cta: `Commente ${mot}`, sous: "Le lien arrive en message privé" } : s));
   const film: Film = { id: `${Date.now().toString(36)}-${crypto.randomBytes(2).toString("hex")}`, date: new Date().toISOString(), sujet: sujetId || "libre", titre, format, fond, variante, graine: crypto.randomBytes(4).toString("hex"), duree, ton, scenes, statut: "attente_voix", voix: false };
   ecrire(film);
   res.json({ ok: true, film: { ...film, texte: texteVoix(film.scenes) } });
