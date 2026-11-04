@@ -10,7 +10,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import express, { type Request, type Response } from "express";
-import { askGeminiEmail, isGeminiConfigured } from "./gemini.js";
+import { askGeminiEmail, askGeminiJson, isGeminiConfigured } from "./gemini.js";
 import { verifierRegles, tropProche, legendes } from "./studio.js";
 
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
@@ -99,10 +99,15 @@ function choisirFond(recents: Film[]): { fond: Film["fond"]; variante: string } 
 }
 
 // ───────────── Vocabulaire des scenes : combien de phrases de voix chacune consomme ─────────────
+const borne = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 const NB_LIGNES: Record<string, (s: Scene) => number> = {
   accroche: () => 4, bulles: () => 2, champ: (s) => 2 + (Array.isArray(s.puces) ? Math.min(3, s.puces.length) : 0), carte: () => 3,
   paiement: (s) => 3 + (Array.isArray(s.pastilles) ? Math.min(3, s.pastilles.length) : 0), livreur: () => 4, code: () => 4, fin: () => 4,
   ecran: (s) => (Array.isArray(s.etapes) ? Math.min(4, s.etapes.length) : 0),
+  // Bibliotheque motion : le nombre de phrases s'adapte, entre deux bornes.
+  motgeant: (s) => borne(s.lignes.length, 1, 4), slam: (s) => borne(s.lignes.length, 1, 4), telephone: (s) => borne(s.lignes.length, 2, 4),
+  notifs: (s) => borne(s.lignes.length, 2, 4), liste: (s) => borne(s.lignes.length, 2, 4), note: (s) => borne(s.lignes.length, 2, 4),
+  recherche: () => 3, fiche: () => 3, trajet: () => 3, sondage: () => 3, avantapres: () => 2, compteur: () => 2,
 };
 const OBJETS = ["colis", "repere", "scooter", "telephone", "coche", "bulle", "bouclier", "cloche", "enveloppe"];
 const PERSOS = ["per-livreur2", "per-maman", "per-jeune-femme"];
@@ -118,11 +123,15 @@ export const SUJETS: Array<{ id: string; titre: string; note: string }> = [
 ];
 
 /** Scènes qui ont un sens pour chaque sujet (le code de livraison et le livreur ne vont pas dans un film sur le parrainage). */
+/** Scenes de motion design pur : aucune capture requise, elles vont avec tous les sujets. */
+const MOTION = ["motgeant", "slam", "telephone", "recherche", "fiche", "liste", "avantapres", "notifs", "trajet", "sondage", "note"];
+/** Seuls chiffres qu'une scene « compteur » peut afficher : les faits confirmes. */
+const CHIFFRES_CONFIRMES = [50, 100, 5000];
 const SCENES_PERMISES: Record<string, string[]> = {
-  points: ["bulles", "champ", "carte", "paiement", "ecran"],
-  emballage: ["bulles", "champ", "carte", "ecran"],
-  suivi: ["bulles", "champ", "livreur", "code", "ecran"],
-  libre: ["bulles", "champ", "carte", "paiement", "livreur", "code", "ecran"],
+  points: ["bulles", "champ", "carte", "paiement", "ecran", "compteur", ...MOTION],
+  emballage: ["bulles", "champ", "carte", "ecran", ...MOTION],
+  suivi: ["bulles", "champ", "livreur", "code", "ecran", ...MOTION],
+  libre: ["bulles", "champ", "carte", "paiement", "livreur", "code", "ecran", "compteur", ...MOTION],
 };
 const PRESET_COLIS: Scene[] = [
   { type: "accroche", lignes: ["À Conakry,", "personne n'a d'adresse.", "Alors,", "comment on envoie un colis ?"], split: 2, objet: "colis", fond: "rue", sousTitres: false },
@@ -142,6 +151,12 @@ function nettoyer(brut: unknown, permises: string[] = Object.keys(NB_LIGNES)): {
   const arr = Array.isArray(brut) ? brut : [];
   const scenes: Scene[] = [];
   const vus = new Set<string>();
+  /** Une scene inutilisable devient un « mot geant » : le script n'echoue plus, et la voix reste entiere. */
+  const repli = (brutes: unknown) => {
+    const l = (Array.isArray(brutes) ? brutes : []).map((t) => court(t, 70)).filter(Boolean);
+    for (let i = 0; i < l.length; i += 4) scenes.push({ type: "motgeant", lignes: l.slice(i, i + 4) });
+  };
+  const obj = (v: unknown) => (v ?? {}) as Record<string, unknown>;
   for (const x of arr as Array<Record<string, unknown>>) {
     const type = String(x?.type ?? "");
     if (type === "ecran") {
@@ -157,13 +172,14 @@ function nettoyer(brut: unknown, permises: string[] = Object.keys(NB_LIGNES)): {
         while (etapes.length < lignes.length) etapes.push({ ...etapes[etapes.length - 1], saisie: undefined } as (typeof etapes)[number]);
         etapes.length = lignes.length;
       }
-      if (!cap || etapes.length < 2 || lignes.length !== etapes.length) { erreurs.push("« ecran » invalide (image inconnue ou nombre de lignes différent des étapes)"); continue; }
-      if (scenes.filter((q) => q.type === "ecran").length >= 3 || !permises.includes("ecran")) continue;
+      if (!cap || etapes.length < 2 || lignes.length !== etapes.length) { repli(lignes); continue; }
+      if (scenes.filter((q) => q.type === "ecran").length >= 3 || !permises.includes("ecran")) { repli(lignes); continue; }
       scenes.push({ type: "ecran", lignes, image: cap.id, etapes });
       continue;
     }
-    if (!NB_LIGNES[type] || type === "fin" || vus.has(type) || (type !== "accroche" && !permises.includes(type))) continue;
-    vus.add(type);
+    if (type === "fin") continue;
+    if (type !== "accroche" && (!NB_LIGNES[type] || vus.has(type) || !permises.includes(type))) { repli(x?.lignes); continue; }
+    if (type !== "motgeant") vus.add(type);
     const s: Scene = { ...x, type, lignes: (Array.isArray(x.lignes) ? x.lignes : []).map((l) => court(l, 70)).filter(Boolean) };
     if (s.objet !== undefined && !OBJETS.includes(String(s.objet))) s.objet = "colis";
     if (type === "champ") s.puces = (Array.isArray(x.puces) ? x.puces : []).slice(0, 3).map((p) => ({ texte: court((p as Record<string, unknown>)?.texte, 28), vignette: VIGNETTES.includes(String((p as Record<string, unknown>)?.vignette)) ? (p as Record<string, unknown>).vignette : "th-rue" }));
@@ -176,8 +192,22 @@ function nettoyer(brut: unknown, permises: string[] = Object.keys(NB_LIGNES)): {
       const pe = (x.personne ?? {}) as Record<string, unknown>;
       s.personne = { image: PERSOS.includes(String(pe.image)) ? pe.image : "per-maman", texte: court(pe.texte, 34) };
     }
+    if (type === "telephone") { s.messages = (Array.isArray(x.messages) ? x.messages : []).slice(0, s.lignes.length).map((m) => ({ de: obj(m).de === "out" ? "out" : "in", texte: court(obj(m).texte, 44) })).filter((m) => m.texte); if ((s.messages as unknown[]).length < 2) { repli(x.lignes); continue; } s.horodatage = court(x.horodatage, 20) || "AUJOURD’HUI"; }
+    if (type === "recherche") { s.requete = court(x.requete, 28) || "livraison de colis"; s.resultats = (Array.isArray(x.resultats) ? x.resultats : []).slice(0, 3).map((r) => ({ titre: court(obj(r).titre, 26), sous: court(obj(r).sous, 34) })).filter((r) => r.titre); s.choix = borne(Number(x.choix) || 0, 0, 2); if ((s.resultats as unknown[]).length < 2) { repli(x.lignes); continue; } }
+    if (type === "fiche") { s.etiquette = court(x.etiquette, 34) || "À SAVOIR"; s.titre = court(x.titre, 34); s.rubriques = (Array.isArray(x.rubriques) ? x.rubriques : []).slice(0, 4).map((r) => ({ k: court(obj(r).k, 18), v: court(obj(r).v, 28) })).filter((r) => r.k && r.v); s.chute = court(x.chute, 70); if (!s.titre || (s.rubriques as unknown[]).length < 2) { repli(x.lignes); continue; } }
+    if (type === "liste") s.titre = court(x.titre, 30);
+    if (type === "note") { s.titre = court(x.titre, 24) || "À retenir"; delete s.notes; }
+    if (type === "avantapres") { const a = obj(x.avant), p = obj(x.apres); s.avant = { titre: court(a.titre, 34), texte: court(a.texte, 60) }; s.apres = { titre: court(p.titre, 34), texte: court(p.texte, 60) }; if (!court(a.titre, 34) || !court(p.titre, 34)) { repli(x.lignes); continue; } }
+    if (type === "notifs") { s.notifs = (Array.isArray(x.notifs) ? x.notifs : []).slice(0, s.lignes.length).map((n) => ({ titre: court(obj(n).titre, 26), sous: court(obj(n).sous, 38) })).filter((n) => n.titre); s.heure = /^\d{1,2}:\d{2}$/.test(String(x.heure)) ? x.heure : "15:45"; if ((s.notifs as unknown[]).length < 2) { repli(x.lignes); continue; } }
+    if (type === "trajet") { s.depart = court(x.depart, 24) || "Marché de Madina"; s.arrivee = court(x.arrivee, 24) || "Carrefour Kipé"; }
+    if (type === "sondage") { s.question = court(x.question, 60); s.a = court(x.a, 30); s.b = court(x.b, 30); s.appel = "Commente A ou B"; if (!s.question || !s.a || !s.b) { repli(x.lignes); continue; } }
+    if (type === "compteur") { const v = Number(x.valeur); if (!CHIFFRES_CONFIRMES.includes(v)) { repli(x.lignes); continue; } s.valeur = v; s.unite = court(x.unite, 22); s.label = court(x.label, 50); }
     const n = NB_LIGNES[type](s);
-    if (s.lignes.length !== n) { erreurs.push(`« ${type} » doit avoir ${n} phrases de voix (reçu ${s.lignes.length})`); continue; }
+    if (s.lignes.length !== n) {
+      if (type === "accroche") { erreurs.push(`« accroche » doit avoir ${n} phrases de voix (reçu ${s.lignes.length})`); continue; }
+      repli(s.lignes);
+      continue;
+    }
     scenes.push(s);
   }
   return { scenes, erreurs };
@@ -222,6 +252,21 @@ function consigne(sujet: string, note: string, recents: string[], permises: stri
     '• code (4 lignes) : le code de livraison puis la remise à la bonne personne. Champs : etiquette, chiffres (4 chiffres), personne {image: per-maman|per-livreur2|per-jeune-femme, texte}.',
     `• ecran (2 à 4 lignes, une par étape) : une VRAIE capture de l'appli, avec zoom sur une zone, mise en valeur, curseur qui clique et parfois du texte qui s'écrit dans un champ vide. Champs : image (un id de la liste ci-dessous), etapes (une par ligne de voix : {zone: id de zone, saisie?: texte à écrire seulement si la zone est marquée [saisie] (≤ 30 caractères), zoom?: 1 à 2}). Utilise 1 à 3 scènes « ecran » : c'est la preuve visuelle que l'appli fait bien ce que dit la voix. Plusieurs scènes ecran peuvent utiliser des images différentes.`,
     "CAPTURES DISPONIBLES (id : ce que l'écran montre ; zones) :\n" + bibliotheque().map((c) => `- ${c.id} : ${c.quoi} Zones : ${c.zones.map((z) => z.id + (z.saisie ? " [saisie]" : "")).join(", ")}.`).join("\n"),
+    "BIBLIOTHÈQUE DE SCÈNES MOTION (aucune capture nécessaire, à utiliser largement quand le sujet s'y prête) :",
+    "• motgeant (1 à 4 lignes, très courtes) : une phrase par écran, en mots géants. Idéal pour un contraste ou une chute. Peut revenir plusieurs fois.",
+    "• slam (1 à 4 lignes de 1 à 3 mots) : mots plein écran sur fond orange, qui claquent et font trembler l'image. Pour un temps fort, une seule fois.",
+    '• telephone (2 à 4 lignes) : un fil de messages dans un téléphone, un message par ligne de voix. Champs : messages ({de:"in"|"out", texte ≤ 40 caractères}).',
+    "• recherche (3 lignes) : une recherche qui se tape (ligne 1), des résultats qui s'empilent (ligne 2), l'un passe devant (ligne 3). Champs : requete (≤ 28), resultats (3 {titre, sous}, résultats génériques sans nom de vraie entreprise, sauf Delivrou), choix (index du résultat Delivrou).",
+    "• fiche (3 lignes) : fiche façon documentaire animalier, avec humour (ex. « Le destinataire : habitat, signe particulier »). Champs : etiquette (ex. « ÉPISODE 1 · LA FUITE »), titre, rubriques (3 ou 4 {k ≤ 18, v ≤ 28}), chute (grosse phrase finale, ≤ 60).",
+    "• liste (2 à 4 lignes) : points cochés un à un, chaque ligne de voix est un point (≤ 40 caractères). Champ : titre.",
+    "• avantapres (2 lignes) : un panneau gris, puis un panneau orange. Champs : avant {titre, texte}, apres {titre, texte}.",
+    "• notifs (2 à 4 lignes) : des notifications de l'appli qui tombent et s'empilent, une par ligne. Champs : notifs ({titre ≤ 26, sous ≤ 38}), heure.",
+    "• trajet (3 lignes) : un plan où l'itinéraire se trace entre deux points de repère, le scooter le suit. Champs : depart, arrivee (vrais repères de Conakry).",
+    "• sondage (3 lignes) : une question et deux réponses A/B, qui invite à commenter. Lignes : question, réponse A, réponse B. Champs : question, a, b.",
+    "• note (2 à 4 lignes) : un bloc-notes où chaque ligne de voix s'écrit. Champ : titre.",
+    permises.includes("compteur") ? "• compteur (2 lignes) : un grand chiffre qui monte. Champs : valeur (uniquement 50, 100 ou 5000), unite, label." : "",
+    "VARIÉTÉ : au moins deux scènes de la bibliothèque motion dans chaque film, et pas deux scènes du même genre à la suite.",
+    "HISTOIRE : quand c'est possible, raconte une petite scène de la vie avec un personnage fictif (un prénom guinéen), une situation drôle, une ironie, puis la chute. Il n'est jamais présenté comme un vrai client : aucun avis, aucune citation de client.",
     "La scène finale « fin » est ajoutée automatiquement : n'écris pas la conclusion et ne mets pas d'appel à télécharger.",
     "RÈGLES STRICTES : le seul service disponible est le COLIS (jamais repas, pharmacie, épicerie) ; aucun délai chiffré ni prix ; aucune promesse de rapidité (jamais « vite », « rapide », « express ») ; aucun chiffre inventé (sauf ceux confirmés : 50 Deli-points par parrainage = 5 000 GNF, 1 point = 100 GNF) ; pas de paiement en espèces ; aucune fausse urgence ; pas de concours ni tirage au sort ; rien de religieux ; pas de faux avis ni témoignage. Les phrases doivent être vraies : coursiers vérifiés, point de repère, photo du colis (preuve), prix affiché avant de valider, paiement mobile, suivi en direct, code de retrait et de livraison.",
     recents.length ? `Accroches déjà utilisées (n'en répète ni les mots ni l'idée, trouve un autre angle) :\n${recents.map((r) => "- " + r).join("\n")}` : "",
@@ -236,12 +281,18 @@ function extraire(texte: string): Record<string, unknown> | null {
   const a = brut.indexOf("{");
   const z = brut.lastIndexOf("}");
   if (a < 0 || z <= a) return null;
-  try {
-    const o: unknown = JSON.parse(brut.slice(a, z + 1));
-    return o && typeof o === "object" ? (o as Record<string, unknown>) : null;
-  } catch {
-    return null;
+  const morceau = brut.slice(a, z + 1);
+  // Seconde chance : virgule en trop avant une fermeture, guillemets typographiques autour des champs.
+  for (const essai of [morceau, morceau.replace(/,\s*([}\]])/g, "$1").replace(/[\u201C\u201D]/g, '"')]) {
+    try {
+      const o: unknown = JSON.parse(essai);
+      if (o && typeof o === "object") return o as Record<string, unknown>;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      if (essai !== morceau) console.error("[films] JSON illisible :", err instanceof Error ? err.message : err, morceau.slice(0, 300));
+    }
   }
+  return null;
 }
 
 const toutesLesLignes = (scenes: Scene[]) => scenes.flatMap((s) => s.lignes);
@@ -249,6 +300,68 @@ export const texteVoix = (scenes: Scene[]) => scenes.map((s) => s.lignes.join(" 
 
 // ───────────── Routes protegees par le mot de passe du QG ─────────────
 export const filmsRouter = express.Router();
+
+// ───────────── Bibliotheque de scenes : ce qu'on a, ce qui plait, ce qui a servi ─────────────
+const CATALOGUE_SCENES: Array<{ id: string; nom: string; quoi: string; famille: string }> = [
+  { id: "accroche", nom: "Accroche", quoi: "Mots géants, mot barré, question et objet 3D. Toujours en premier.", famille: "Accroche" },
+  { id: "motgeant", nom: "Mot géant", quoi: "Une phrase par écran, en mots géants. Pour un contraste ou une chute.", famille: "Texte" },
+  { id: "slam", nom: "Slam", quoi: "Mots plein écran sur fond orange, l'image tremble. Pour un temps fort.", famille: "Texte" },
+  { id: "note", nom: "Bloc-notes", quoi: "Chaque phrase s'écrit dans un bloc-notes, lettre par lettre.", famille: "Texte" },
+  { id: "liste", nom: "Liste cochée", quoi: "Les points se cochent un à un, reliés par une ligne.", famille: "Texte" },
+  { id: "telephone", nom: "Téléphone", quoi: "Un fil de messages qui se tapent et s'envoient.", famille: "Téléphone" },
+  { id: "recherche", nom: "Recherche", quoi: "Une recherche se tape, les résultats s'empilent, Delivrou passe devant.", famille: "Téléphone" },
+  { id: "notifs", nom: "Notifications", quoi: "Les notifications de l'appli tombent et s'empilent.", famille: "Téléphone" },
+  { id: "bulles", nom: "Bulles et appel manqué", quoi: "Le « avant » : des messages, un appel manqué, un livreur qui tourne en rond.", famille: "Téléphone" },
+  { id: "trajet", nom: "Trajet sur plan", quoi: "L'itinéraire se trace entre deux repères, le scooter le suit.", famille: "Delivrou" },
+  { id: "avantapres", nom: "Avant / après", quoi: "Un panneau gris, puis un panneau orange qui prend le dessus.", famille: "Histoire" },
+  { id: "fiche", nom: "Fiche documentaire", quoi: "Fiche pleine d'humour façon documentaire animalier, puis une chute.", famille: "Histoire" },
+  { id: "sondage", nom: "Sondage A ou B", quoi: "Une question, deux réponses : on invite à commenter.", famille: "Interaction" },
+  { id: "compteur", nom: "Compteur", quoi: "Un grand chiffre qui monte. Seulement les chiffres confirmés.", famille: "Chiffres" },
+  { id: "ecran", nom: "Capture de l'appli", quoi: "Une vraie capture, avec zoom, curseur et saisie.", famille: "Delivrou" },
+  { id: "champ", nom: "Champ de formulaire", quoi: "Un champ se remplit, puis trois puces se cochent.", famille: "Delivrou" },
+  { id: "carte", nom: "Carte et photo", quoi: "Une carte avec un champ et la photo du colis.", famille: "Delivrou" },
+  { id: "paiement", nom: "Paiement", quoi: "Le choix du mode de paiement, le prix avant de valider.", famille: "Delivrou" },
+  { id: "livreur", nom: "Livreur et suivi", quoi: "Le livreur vérifié et le suivi sur la carte.", famille: "Delivrou" },
+  { id: "code", nom: "Code de livraison", quoi: "Le code, puis la remise à la bonne personne.", famille: "Delivrou" },
+  { id: "fin", nom: "Fin", quoi: "Le logo, le slogan et l'appel à commenter. Toujours en dernier.", famille: "Fin" },
+];
+const NOTES_SCENES = path.join(AUTH_DIR, "qg", "scenes-notes.json");
+const lireNotes = (): Record<string, number> => {
+  try { return JSON.parse(fs.readFileSync(NOTES_SCENES, "utf8")) as Record<string, number>; } catch { return {}; }
+};
+/** Les scenes qu'on a marquees « a eviter » ne sont plus proposees a l'IA ; celles qu'on aime sont privilegiees. */
+const permisesNotees = (sujet: string): string[] => {
+  const notes = lireNotes();
+  return (SCENES_PERMISES[sujet] ?? SCENES_PERMISES.libre).filter((t) => notes[t] !== -1);
+};
+const consigneVariete = (): string => {
+  const notes = lireNotes();
+  const aimees = Object.keys(notes).filter((k) => notes[k] === 1);
+  const compte = new Map<string, number>();
+  tous().slice(0, 6).forEach((f) => f.scenes.forEach((q) => { if (q.type !== "accroche" && q.type !== "fin") compte.set(q.type, (compte.get(q.type) || 0) + 1); }));
+  const usees = [...compte.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k]) => k);
+  return [aimees.length ? `Scènes que l'équipe aime, à privilégier : ${aimees.join(", ")}.` : "", usees.length ? `Scènes très utilisées dans les derniers films, à éviter cette fois sauf si le sujet l'exige : ${usees.join(", ")}.` : ""].filter(Boolean).join(" ");
+};
+
+filmsRouter.get("/scenes", (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  const notes = lireNotes();
+  const usage = new Map<string, number>();
+  tous().forEach((f) => f.scenes.forEach((q) => usage.set(q.type, (usage.get(q.type) || 0) + 1)));
+  res.json({ ok: true, scenes: CATALOGUE_SCENES.map((c) => ({ ...c, note: notes[c.id] ?? 0, usage: usage.get(c.id) ?? 0 })) });
+});
+
+filmsRouter.post("/scenes/:id/note", express.json({ limit: "1kb" }), (req: Request, res: Response) => {
+  const id = String(req.params.id);
+  if (!CATALOGUE_SCENES.some((c) => c.id === id)) { res.status(404).json({ ok: false, erreur: "Scène inconnue." }); return; }
+  if (id === "accroche" || id === "fin") { res.status(400).json({ ok: false, erreur: "Cette scène est obligatoire." }); return; }
+  const v = Number((req.body as Record<string, unknown> | undefined)?.note);
+  const notes = lireNotes();
+  if (v === 1 || v === -1) notes[id] = v; else delete notes[id];
+  fs.mkdirSync(path.dirname(NOTES_SCENES), { recursive: true });
+  fs.writeFileSync(NOTES_SCENES, JSON.stringify(notes, null, 2));
+  res.json({ ok: true, note: notes[id] ?? 0 });
+});
 
 filmsRouter.get("/", (_req, res) => {
   res.set("Cache-Control", "no-store");
@@ -284,10 +397,10 @@ filmsRouter.post("/script", express.json({ limit: "64kb" }), async (req: Request
     let ok: Scene[] | null = null;
     let dernier = "";
     for (let essai = 0; essai < 3 && !ok; essai++) {
-      const r = await askGeminiEmail(consigne(sujetId === "libre" ? libre : (preset?.titre ?? libre), preset?.note ?? "", recents, SCENES_PERMISES[sujetId] ?? SCENES_PERMISES.libre, duree, ton));
+      const r = await askGeminiJson(consigne(sujetId === "libre" ? libre : (preset?.titre ?? libre), preset?.note ?? "", recents, permisesNotees(sujetId), duree, ton) + "\n" + consigneVariete());
       const o = r.ok && r.text ? extraire(r.text) : null;
       if (!o) { dernier = r.error || "Réponse illisible."; continue; }
-      const { scenes: sc, erreurs } = nettoyer(o.scenes, SCENES_PERMISES[sujetId] ?? SCENES_PERMISES.libre);
+      const { scenes: sc, erreurs } = nettoyer(o.scenes, permisesNotees(sujetId));
       if (sc.length < 3 || sc[0].type !== "accroche") { dernier = erreurs[0] || "Il faut au moins 3 scènes et une accroche."; continue; }
       { const faible = accrocheFaible(sc[0].lignes); if (faible) { dernier = faible; continue; } }
       const textes = JSON.stringify(sc.map((s) => ({ ...s, type: undefined })));
@@ -421,12 +534,12 @@ filmsRouter.post("/:id/refaire", express.json({ limit: "8kb" }), async (req: Req
     return;
   }
   if (!isGeminiConfigured()) { res.status(503).json({ ok: false, erreur: "L'IA n'est pas configurée sur le serveur." }); return; }
-  const permises = SCENES_PERMISES[f.sujet] ?? SCENES_PERMISES.libre;
+  const permises = permisesNotees(f.sujet);
   const note = `MODIFIE un script existant selon cette demande de l'équipe : « ${demande} ». Script actuel (JSON) : ${JSON.stringify(f.scenes.map((s) => ({ ...s, type: s.type })))}. Garde ce qui n'est pas concerné par la demande.`;
   let ok: Scene[] | null = null;
   let dernier = "";
   for (let essai = 0; essai < 3 && !ok; essai++) {
-    const r = await askGeminiEmail(consigne(f.titre, note, [], permises, f.duree ?? 40, f.ton ?? "chaleureux"));
+    const r = await askGeminiJson(consigne(f.titre, note, [], permises, f.duree ?? 40, f.ton ?? "chaleureux"));
     const o = r.ok && r.text ? extraire(r.text) : null;
     if (!o) { dernier = r.error || "Réponse illisible."; continue; }
     const { scenes: sc, erreurs } = nettoyer(o.scenes, permises);

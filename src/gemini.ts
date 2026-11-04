@@ -117,7 +117,7 @@ function withKnowledge(prompt: string): string {
   return k ? `${prompt}\n\n${k}` : prompt;
 }
 
-async function callGemini(prompt: string, mode: "whatsapp" | "email" = "whatsapp"): Promise<{ ok: boolean; text?: string; error?: string }> {
+async function callGemini(prompt: string, mode: "whatsapp" | "email" | "json" = "whatsapp"): Promise<{ ok: boolean; text?: string; error?: string }> {
   if (!GEMINI_API_KEY) {
     return { ok: false, error: "GEMINI_API_KEY non configurée sur le serveur." };
   }
@@ -143,7 +143,7 @@ async function callGemini(prompt: string, mode: "whatsapp" | "email" = "whatsapp
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [{ parts: [{ text: withKnowledge(prompt) }] }],
-            generationConfig: { temperature: 0.6, maxOutputTokens: 2048, ...extraConfig },
+            generationConfig: { temperature: 0.6, maxOutputTokens: mode === "json" ? 8192 : 2048, ...(mode === "json" ? { responseMimeType: "application/json" } : {}), ...extraConfig },
           }),
         },
       );
@@ -179,7 +179,7 @@ async function callGemini(prompt: string, mode: "whatsapp" | "email" = "whatsapp
       }
       // Un email n'est pas un message WhatsApp : pas de limite de 600 signes ni
       // d'obligation de finir par une ponctuation (une signature n'en a pas).
-      const text = mode === "email" ? raw.replace(/^```\w*\n?|```$/g, "").trim() : sanitizeAiText(raw);
+      const text = mode !== "whatsapp" ? raw.replace(/^```\w*\n?|```$/g, "").trim() : sanitizeAiText(raw);
       if (!text) {
         lastError = "Réponse IA mal formée, ignorée par sécurité.";
         continue;
@@ -274,6 +274,11 @@ export async function askGemini(instruction: string): Promise<{ ok: boolean; tex
  * dont la forme (salutation, signature, paragraphes) n'est pas celle d'un
  * message court. Le contexte entreprise reste inclus.
  */
+/** Reponse longue et structuree (script de film) : Gemini est tenu de renvoyer du JSON valide. */
+export async function askGeminiJson(instruction: string): Promise<{ ok: boolean; text?: string; error?: string }> {
+  return callGemini(`${COMPANY_CONTEXT}\n\n${instruction}`, "json");
+}
+
 export async function askGeminiEmail(instruction: string): Promise<{ ok: boolean; text?: string; error?: string }> {
   return callGemini(`${COMPANY_CONTEXT}\n\n${instruction}`, "email");
 }
