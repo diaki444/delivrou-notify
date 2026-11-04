@@ -152,6 +152,11 @@ function nettoyer(brut: unknown, permises: string[] = Object.keys(NB_LIGNES)): {
         return { zone: zone?.id ?? "", zoom: Math.max(1, Math.min(2.2, Number(e1.zoom) || 1.6)), ...(zone?.saisie && e1.saisie ? { saisie: court(e1.saisie, 34) } : {}) };
       });
       const lignes = (Array.isArray(x.lignes) ? x.lignes : []).map((l) => court(l, 70)).filter(Boolean);
+      // Reparation : l'IA se trompe souvent d'une etape. On aligne les etapes sur les phrases de voix.
+      if (cap && etapes.length >= 1 && lignes.length >= 2 && lignes.length <= 4 && lignes.length !== etapes.length) {
+        while (etapes.length < lignes.length) etapes.push({ ...etapes[etapes.length - 1], saisie: undefined } as (typeof etapes)[number]);
+        etapes.length = lignes.length;
+      }
       if (!cap || etapes.length < 2 || lignes.length !== etapes.length) { erreurs.push("« ecran » invalide (image inconnue ou nombre de lignes différent des étapes)"); continue; }
       if (scenes.filter((q) => q.type === "ecran").length >= 3 || !permises.includes("ecran")) continue;
       scenes.push({ type: "ecran", lignes, image: cap.id, etapes });
