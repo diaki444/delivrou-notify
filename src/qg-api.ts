@@ -59,6 +59,7 @@ import {
 import { filmsRouter } from "./films.js";
 import { affichesCapturesRouter } from "./affiches-captures.js";
 import { commentairesRouter } from "./qg-commentaires.js";
+import { declencheursRouter } from "./declencheurs.js";
 import { programmer, lister, annuler, verifierDemande, statistiquesPost, type DemandeProgrammation } from "./zernio-publish.js";
 import { otpSecuritySummary } from "./otp.js";
 import { responseStats, pendingChats } from "./metrics.js";
@@ -470,6 +471,9 @@ qgApiRouter.get("/programmer/stats", async (req, res) => {
   const r = await statistiquesPost(id);
   res.status(r.ok ? 200 : 502).json(r.ok ? { ok: true, stats: r.stats, attente: r.attente } : { ok: false, error: r.erreur });
 });
+
+/** Mots-cles : un commentaire ou un message qui contient un mot declenche une reponse. */
+qgApiRouter.use("/declencheurs", declencheursRouter);
 
 /** Commentaires Facebook et TikTok : lire, proposer une reponse, envoyer apres validation. */
 qgApiRouter.use("/commentaires", commentairesRouter);

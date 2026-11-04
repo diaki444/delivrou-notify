@@ -15,6 +15,7 @@ import { isGeminiConfigured, suggestReply } from "./gemini.js";
 import { CATEGORY_LABELS } from "./categories.js";
 import { notifyAllSubscriptions } from "./push.js";
 import { metaClient } from "./whatsapp-meta.js";
+import { traiterMessageWhatsapp } from "./declencheurs.js";
 
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
 
@@ -142,6 +143,7 @@ class WhatsAppClient {
     });
 
     if (!fromMe) {
+      void traiterMessageWhatsapp(jid, text, senderName, (j, t2) => this.sendText(j, t2)).catch(() => {});
       if (isGeminiConfigured()) void this.generateReplySuggestion(jid);
       const displayName = this.contactNames.get(jid) || senderName || getChat(jid)?.name;
       void notifyAllSubscriptions({
