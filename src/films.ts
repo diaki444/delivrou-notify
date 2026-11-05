@@ -580,7 +580,9 @@ export const filmsMachineRouter = express.Router();
 filmsMachineRouter.get("/a-produire", (_req, res) => {
   res.set("Cache-Control", "no-store");
   dernierPassagePc = Date.now();
-  res.json({ ok: true, films: tous().filter((f) => f.statut === "a_produire").map((f) => ({ id: f.id, titre: f.titre, format: f.format, fond: f.fond, variante: f.variante ?? "", graine: f.graine ?? f.id, scenes: f.scenes })) });
+  // Un film "en production" sans nouvelle depuis 10 min : le PC a ete coupe en plein rendu, on le reprend.
+  const abandonne = (f: Film) => f.statut === "en_production" && Date.now() - new Date(f.maj ?? 0).getTime() > 10 * 60_000;
+  res.json({ ok: true, films: tous().filter((f) => f.statut === "a_produire" || abandonne(f)).map((f) => ({ id: f.id, titre: f.titre, format: f.format, fond: f.fond, variante: f.variante ?? "", graine: f.graine ?? f.id, scenes: f.scenes })) });
 });
 /** Une video deja faite ailleurs (le fichier est deja envoye sous films/<id>/film.mp4) : elle arrive dans la liste, prete a programmer. */
 filmsMachineRouter.post("/importer", express.json({ limit: "16kb" }), (req: Request, res: Response) => {
