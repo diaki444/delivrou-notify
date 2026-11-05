@@ -16,6 +16,7 @@ import { zernioRequest, listAccounts, isZernioConfigured, type ZernioAccount } f
 import { addSendLogEntry } from "./store.js";
 import { verifierRegles } from "./studio.js";
 import { lister } from "./zernio-publish.js";
+import { askGeminiJson, isGeminiConfigured } from "./gemini.js";
 
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
 const FICHIER = path.join(AUTH_DIR, "qg", "declencheurs.json");
@@ -318,6 +319,88 @@ declencheursRouter.post("/:id/supprimer", async (req: Request, res: Response) =>
   etat.items.splice(i, 1);
   sauver();
   res.json({ ok: true, avertissements });
+});
+
+// ───────────── Idées écrites par Gemini (toujours validées par l'équipe avant d'être utilisées) ─────────────
+const FICHIER_IA = path.join(AUTH_DIR, "qg", "declencheurs-ia.json");
+const REGLES_IA = "RÈGLES STRICTES : tutoiement, français simple de Conakry. Le seul service est le COLIS (jamais repas, pharmacie, épicerie). Aucun prix ni délai chiffré, aucune promesse de rapidité (jamais « vite », « rapide », « express »), aucun chiffre inventé, aucun faux avis ni témoignage, pas de paiement en espèces, rien de religieux, ethnique ou politique. N'utilise que des faits donnés plus haut sur Delivrou. Une accroche ne commence jamais par « Salut », « Bonjour », « Découvrez ».";
+interface IdeesIA { date: string; idees: Array<Record<string, string>>; quiz: Array<{ q: string; a: string[]; bonne: string; expl: string }>; accroches: string[]; fins: string[] }
+let genEnCours = false;
+const appelsIA: number[] = [];
+const quotaIA = () => {
+  const m = Date.now();
+  while (appelsIA.length && m - appelsIA[0] > 3600_000) appelsIA.shift();
+  if (appelsIA.length >= 30) return false;
+  appelsIA.push(m);
+  return true;
+};
+const texteSur = (v: unknown, n: number) => { const s = t(v, n); return s && !verifierRegles(s).length ? s : ""; };
+const listeSure = (v: unknown, n: number, max: number) => [...new Set((Array.isArray(v) ? v : []).map((x) => texteSur(x, n)).filter(Boolean))].slice(0, max);
+const json = (texte: string): Record<string, unknown> | null => {
+  const a = texte.indexOf("{"), z = texte.lastIndexOf("}");
+  if (a < 0 || z <= a) return null;
+  try { return JSON.parse(texte.slice(a, z + 1)) as Record<string, unknown>; } catch { return null; }
+};
+const lireIA = (): IdeesIA | null => { try { return JSON.parse(fs.readFileSync(FICHIER_IA, "utf8")) as IdeesIA; } catch { return null; } };
+
+async function genererIdees(): Promise<IdeesIA | null> {
+  charger();
+  const avant = lireIA();
+  const dejaVus = [...etat.items.map((d) => d.nom), ...(avant?.idees ?? []).map((x) => x.nom), ...(avant?.quiz ?? []).map((x) => x.q), ...(avant?.accroches ?? [])].join(" | ");
+  const r = await askGeminiJson([
+    "Tu aides l'équipe marketing de Delivrou à faire réagir les gens sur Facebook et TikTok. Un commentaire qui contient un mot-clé déclenche un message privé.",
+    REGLES_IA,
+    "Propose du NEUF, drôle ou intrigant, qui donne envie de commenter. Évite ce qui existe déjà : " + (dejaVus || "rien pour l'instant") + ".",
+    'Réponds UNIQUEMENT en JSON : {"idees":[6 objets {"nom":"UN MOT EN MAJUSCULES","mots":"2 ou 3 mots déclencheurs séparés par des virgules","prive":"message privé commençant par Salut {{first_name}} !","pub":"réponse publique courte avec un emoji","bt":"texte du bouton, 3 mots maximum"}],"quiz":[4 objets {"q":"question amusante sur l\'envoi de colis, dont la réponse est dans les faits donnés","a":["réponse A","réponse B","réponse C"],"bonne":"A, B ou C","expl":"explication d\'une phrase"}],"accroches":[8 débuts de vidéo ou de légende, 12 mots maximum, qui arrêtent le pouce],"fins":[6 phrases de fin qui font réagir, dont certaines demandent de commenter un mot]}',
+  ].join("\n\n"));
+  const o = r.ok && r.text ? json(r.text) : null;
+  if (!o) return null;
+  const idees = (Array.isArray(o.idees) ? (o.idees as Array<Record<string, unknown>>) : []).map((x) => ({
+    nom: t(x.nom, 24).toUpperCase().replace(/[^A-Z0-9À-Ý ]/g, "").trim(), mots: texteSur(x.mots, 80), prive: texteSur(x.prive, 600), pub: texteSur(x.pub, 200), bouton: "site", bt: texteSur(x.bt, 24) || "Ouvrir Delivrou",
+  })).filter((x) => x.nom && x.mots && x.prive && x.pub && !verifierRegles(x.nom).length);
+  const quiz = (Array.isArray(o.quiz) ? (o.quiz as Array<Record<string, unknown>>) : []).map((x) => ({
+    q: texteSur(x.q, 200), a: (Array.isArray(x.a) ? x.a : []).map((y) => texteSur(y, 80)), bonne: String(x.bonne ?? "").trim().toUpperCase().slice(0, 1), expl: texteSur(x.expl, 240),
+  })).filter((x) => x.q && x.expl && x.a.length === 3 && x.a.every(Boolean) && ["A", "B", "C"].includes(x.bonne));
+  const accroches = listeSure(o.accroches, 110, 8), fins = listeSure(o.fins, 130, 6);
+  if (!idees.length && !quiz.length && !accroches.length) return null;
+  const sortie: IdeesIA = { date: new Date().toISOString(), idees, quiz, accroches, fins };
+  fs.mkdirSync(path.dirname(FICHIER_IA), { recursive: true });
+  fs.writeFileSync(FICHIER_IA, JSON.stringify(sortie, null, 2));
+  return sortie;
+}
+const lancerGeneration = () => {
+  if (genEnCours || !isGeminiConfigured() || !quotaIA()) return false;
+  genEnCours = true;
+  genererIdees().catch((e) => console.error("[declencheurs] idees IA :", e)).finally(() => { genEnCours = false; });
+  return true;
+};
+
+/** Les dernières idées. Si elles ont plus d'un jour, de nouvelles sont écrites en arrière-plan. */
+declencheursRouter.get("/ia", (_req: Request, res: Response) => {
+  const c = lireIA();
+  if (!c || Date.now() - new Date(c.date).getTime() > JOUR) lancerGeneration();
+  res.json({ ok: true, ia: isGeminiConfigured(), enCours: genEnCours, ...(c ?? { idees: [], quiz: [], accroches: [], fins: [] }) });
+});
+/** « Générer avec l'IA » : de nouvelles idées tout de suite. */
+declencheursRouter.post("/ia", (_req: Request, res: Response) => {
+  if (!isGeminiConfigured()) { res.status(503).json({ ok: false, erreur: "L'IA n'est pas configurée sur le serveur (GEMINI_API_KEY)." }); return; }
+  if (!genEnCours && !lancerGeneration()) { res.status(429).json({ ok: false, erreur: "Trop de demandes cette heure. Réessaie plus tard." }); return; }
+  res.json({ ok: true, enCours: true });
+});
+/** À chaque programmation : accroches, fins et mot-clé pensés pour cette publication. */
+declencheursRouter.post("/ia/publication", async (req: Request, res: Response) => {
+  if (!isGeminiConfigured()) { res.status(503).json({ ok: false, erreur: "IA non configurée." }); return; }
+  if (!quotaIA()) { res.status(429).json({ ok: false, erreur: "Trop de demandes cette heure." }); return; }
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const r = await askGeminiJson([
+    "Pour cette publication Delivrou, propose de quoi faire réagir.",
+    "Titre : " + t(b.titre, 120) + "\nTexte : " + t(b.texte, 900),
+    REGLES_IA,
+    'Réponds UNIQUEMENT en JSON : {"accroches":[3 débuts de légende, 12 mots maximum],"fins":[3 phrases de fin qui font commenter],"motCle":"un mot en majuscules à faire commenter"}',
+  ].join("\n\n"));
+  const o = r.ok && r.text ? json(r.text) : null;
+  if (!o) { res.status(502).json({ ok: false, erreur: "Pas de réponse de l'IA." }); return; }
+  res.json({ ok: true, accroches: listeSure(o.accroches, 110, 3), fins: listeSure(o.fins, 130, 3), motCle: t(o.motCle, 24).toUpperCase().replace(/[^A-Z0-9À-Ý ]/g, "").trim() });
 });
 
 /** Simule un commentaire : quel mot-clé se déclencherait, et qu'est-ce qui serait envoyé ? */

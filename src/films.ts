@@ -158,6 +158,13 @@ function nettoyer(brut: unknown, permises: string[] = Object.keys(NB_LIGNES)): {
   };
   const obj = (v: unknown) => (v ?? {}) as Record<string, unknown>;
   for (const x of arr as Array<Record<string, unknown>>) {
+    // Les rires ([laughs]…) vont dans le texte pour ElevenLabs, jamais à l'écran.
+    delete x.voixBalisee;
+    if (Array.isArray(x.lignes)) {
+      const brutes = x.lignes.map((l) => String(l ?? ""));
+      if (brutes.some((l) => /\[[^\]]+\]/.test(l))) x.voixBalisee = brutes.join(" ").slice(0, 900);
+      x.lignes = brutes.map(sansBalises).filter(Boolean);
+    }
     const type = String(x?.type ?? "");
     if (type === "ecran") {
       const cap = bibliotheque().find((c) => c.id === String(x.image));
@@ -225,11 +232,28 @@ function accrocheFaible(l: string[]): string | null {
 export const TONS: Record<string, { nom: string; ia: string; voix: string }> = {
   chaleureux: { nom: "Chaleureux", ia: "chaleureux et rassurant, comme un grand frère de confiance", voix: "Voix posée et souriante. Stabilité ≈ 50 %." },
   enthousiaste: { nom: "Enthousiaste", ia: "plein d'énergie et d'enthousiasme, ça respire la bonne nouvelle, quelques exclamations", voix: "Voix dynamique. Stabilité ≈ 30 %, style élevé. Tu peux mettre [excited] au début des phrases fortes dans ElevenLabs (modèle v3)." },
-  drole: { nom: "Drôle", ia: "drôle : une situation de la vie à Conakry exagérée avec tendresse, une chute ou un petit retournement, humour léger jamais moqueur (ni religion, ni ethnie, ni personne réelle)", voix: "Voix expressive. Stabilité ≈ 25 %, style élevé. Dans ElevenLabs (modèle v3) tu peux ajouter [laughs] ou [chuckles] aux bons endroits : à NE PAS écrire dans la vidéo, seulement dans ElevenLabs." },
-  rigolo: { nom: "Rigolo", ia: "rigolo et complice, comme entre amis : taquineries gentilles, expressions parlées de Conakry, rythme vif", voix: "Voix joueuse. Stabilité ≈ 25 %. Dans ElevenLabs (modèle v3) : [laughs] ou [giggles] ponctuels, seulement dans ElevenLabs." },
+  drole: { nom: "Drôle", ia: "vraiment drôle, comme un sketch : on doit éclater de rire. Le narrateur raconte une scène de la vie à Conakry, exagérée, avec de vraies blagues, et il rit lui-même de ce qu'il raconte", voix: "Dans ElevenLabs, choisis le modèle Eleven v3, seul à jouer les rires : les balises [laughs] et [chuckles] sont déjà dans le texte, ne les enlève pas. Voix expressive, stabilité ≈ 25 %. Elles n'apparaissent pas dans la vidéo." },
+  rigolo: { nom: "Rigolo", ia: "rigolo et complice, comme un ami qui te raconte une histoire en se marrant : taquineries gentilles, blagues, expressions parlées de Conakry, rythme vif", voix: "Dans ElevenLabs, choisis le modèle Eleven v3, seul à jouer les rires : les balises [laughs] et [giggles] sont déjà dans le texte, ne les enlève pas. Voix joueuse, stabilité ≈ 25 %. Elles n'apparaissent pas dans la vidéo." },
   rassurant: { nom: "Sérieux et rassurant", ia: "sérieux, calme et rassurant : on parle de confiance, de sécurité, de contrôle", voix: "Voix grave et posée. Stabilité ≈ 65 %." },
   punchy: { nom: "Direct et punchy", ia: "direct et percutant : phrases très courtes, rythme rapide, zéro blabla", voix: "Voix tranchée. Stabilité ≈ 35 %, débit un peu rapide." },
 };
+
+const TONS_QUI_RIENT = ["drole", "rigolo"];
+const CONSIGNE_HUMOUR = [
+  "HUMOUR (aussi important que le hook) : ce film doit faire rire pour de vrai et donner envie de le partager.",
+  "Écris au moins 2 vraies blagues plus une chute qui fait éclater de rire. Pas un texte publicitaire avec un sourire : un petit sketch.",
+  "Procédés : exagération absurde d'une situation vécue à Conakry, personnage fictif avec un prénom guinéen (le cousin qui se perd, la tantine qui appelle dix fois, le colis qui voyage plus que son propriétaire), dialogue imité, auto-dérision du narrateur, comparaison inattendue.",
+  "Interdits dans les blagues : religion, ethnie, politique, handicap, physique, personne réelle, concurrents, et toute moquerie méchante. On rit de la situation, jamais de quelqu'un. Les informations sur Delivrou restent vraies.",
+  "LE NARRATEUR RIT : dans le champ lignes, place 3 à 5 balises en tout, en anglais entre crochets, juste avant ou juste après la phrase drôle : [laughs], [chuckles], [giggles], [laughs harder]. Mets-en une dès la scène accroche et une sur la chute. Ces balises ne comptent pas dans les mots, ne s'affichent pas à l'écran et sont jouées par la voix. N'écris jamais « ha ha » en toutes lettres.",
+].join(" ");
+const sansBalises = (l: string) => l.replace(/\[[^\]]*\]/g, " ").replace(/\s+/g, " ").trim();
+/** Un film drôle où l'IA a oublié les rires : on en place au début et sur la chute. */
+function avecRires(scenes: Scene[], ton: string): Scene[] {
+  if (!TONS_QUI_RIENT.includes(ton) || scenes.some((s) => s.voixBalisee)) return scenes;
+  const i = scenes.map((s) => s.type).lastIndexOf("fin");
+  const chute = (i > 0 ? i : scenes.length) - 1;
+  return scenes.map((s, k) => (k === 0 ? { ...s, voixBalisee: "[chuckles] " + s.lignes.join(" ") } : k === chute ? { ...s, voixBalisee: s.lignes.join(" ") + " [laughs]" } : s));
+}
 
 function consigne(sujet: string, note: string, recents: string[], permises: string[], duree = 40, ton = "chaleureux"): string {
   const t = TONS[ton] ?? TONS.chaleureux;
@@ -239,6 +263,7 @@ function consigne(sujet: string, note: string, recents: string[], permises: stri
     `Tu écris le script d'un film court d'environ ${duree} secondes de voix (environ ${mots} mots en tout, toutes les lignes confondues) pour Facebook et TikTok, pour Delivrou, service de livraison de COLIS à Conakry. Une voix off lit tout le texte ; l'image est du motion design.`,
     `SUJET : ${sujet}. ${note}`,
     `TON DU FILM : ${t.ia}. Ce ton se sent dès la première ligne et jusqu'au bout. Tutoiement, français simple de Conakry, phrases courtes.`,
+    TONS_QUI_RIENT.includes(ton) ? CONSIGNE_HUMOUR : "",
     "HOOK PARFAIT (le plus important) : les 3 premières secondes (scène accroche) doivent arrêter le pouce. Une vraie situation vécue, une question qui pique, une contradiction ou une petite blague, dans le ton choisi. Jamais « Salut », « Bonjour », « Bienvenue », « Découvrez », ni un slogan. L'accroche doit donner envie de connaître la suite. Règles de l'accroche : la 1re ligne fait 6 mots maximum et claque (un fait surprenant, une scène du quotidien à Conakry, une erreur que tout le monde fait, une question directe) ; la 2e ligne enfonce le clou ; les lignes 3 et 4 ouvrent une boucle (une question ou une promesse) dont la réponse arrive plus loin dans le film, pour que la personne reste. Pas de politesse, pas de présentation de Delivrou dans l'accroche.",
     "FIN PARFAITE : la dernière scène avant « fin » est la chute : une phrase courte et mémorable qui répond à la question de l'accroche (le bénéfice concret ou une punchline), jamais une phrase molle ou un résumé. Elle prépare l'appel à commenter un mot-clé qui suit automatiquement. Le film doit se terminer sur une envie d'agir, pas sur un silence.",
     `Scènes autorisées pour CE sujet (et seulement celles-là, en plus de « accroche ») : ${permises.join(", ")}. Choisis les plus pertinentes ; n'utilise pas une scène si elle ne correspond pas au sujet. Les captures d'écran de l'appli (scène « ecran ») sont préférées aux dessins quand elles illustrent le sujet.`,
@@ -296,7 +321,9 @@ function extraire(texte: string): Record<string, unknown> | null {
 }
 
 const toutesLesLignes = (scenes: Scene[]) => scenes.flatMap((s) => s.lignes);
-export const texteVoix = (scenes: Scene[]) => scenes.map((s) => s.lignes.join(" ")).join("\n\n");
+/** Le texte à coller dans ElevenLabs, avec les rires. */
+export const texteVoix = (scenes: Scene[]) => scenes.map((s) => (typeof s.voixBalisee === "string" && s.voixBalisee) || s.lignes.join(" ")).join("\n\n");
+const texteLu = (scenes: Scene[]) => scenes.map((s) => s.lignes.join(" ")).join("\n\n");
 
 // ───────────── Routes protegees par le mot de passe du QG ─────────────
 export const filmsRouter = express.Router();
@@ -408,7 +435,7 @@ filmsRouter.post("/script", express.json({ limit: "64kb" }), async (req: Request
       if (alertes.length) { dernier = alertes[0]; continue; }
       if (recents.some((r2) => tropProche(r2, sc[0].lignes.join(" ")))) { dernier = "Accroche trop proche d'une récente."; continue; }
       titre = court(o.titre, 80) || titre;
-      ok = [...sc, FINALE];
+      ok = avecRires([...sc, FINALE], ton);
     }
     if (!ok) {
       res.status(422).json({ ok: false, erreur: "Le script n'a pas pu être écrit : " + dernier });
@@ -475,7 +502,7 @@ filmsRouter.get("/:id/legendes", async (req: Request, res: Response) => {
   const f = lire(String(req.params.id));
   if (!f) { res.status(404).json({ ok: false, erreur: "Film inconnu" }); return; }
   if (!f.legendes) {
-    f.legendes = (await legendesIA({ titre: f.titre, ton: f.ton, texte: texteVoix(f.scenes) })) ?? legendesModele({ id: f.id, titre: f.titre, texte: texteVoix(f.scenes) });
+    f.legendes = (await legendesIA({ titre: f.titre, ton: f.ton, texte: texteLu(f.scenes) })) ?? legendesModele({ id: f.id, titre: f.titre, texte: texteLu(f.scenes) });
     ecrire(f);
   }
   res.json({ ok: true, ...f.legendes });
@@ -485,7 +512,7 @@ filmsRouter.get("/:id/legendes", async (req: Request, res: Response) => {
 filmsRouter.post("/:id/legendes/regenerer", async (req: Request, res: Response) => {
   const f = lire(String(req.params.id));
   if (!f) { res.status(404).json({ ok: false, erreur: "Film inconnu" }); return; }
-  const n = await legendesIA({ titre: f.titre, ton: f.ton, texte: texteVoix(f.scenes) });
+  const n = await legendesIA({ titre: f.titre, ton: f.ton, texte: texteLu(f.scenes) });
   if (!n) { res.status(503).json({ ok: false, erreur: "L'IA n'a pas pu écrire les légendes. Réessaie." }); return; }
   f.legendes = n;
   ecrire(f);

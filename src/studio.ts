@@ -397,16 +397,17 @@ function construireCommande(d: Demande, j: Entree[]): string {
     const virgule = barre > 0 ? barre : titre.indexOf(",");
     const ligne1 = barre > 0 ? titre.slice(0, barre).trim() : virgule > 0 ? titre.slice(0, virgule + 1) : titre.split(" ").slice(0, Math.ceil(titre.split(" ").length / 2)).join(" ");
     const ligne2 = virgule > 0 ? titre.slice(virgule + 1).trim().replace(/^\|\s*/, "") : titre.split(" ").slice(Math.ceil(titre.split(" ").length / 2)).join(" ");
-    const choix = DIRECTIONS[d.structure] ? d.structure : DIRECTIONS[DIRECTION_DE_LETTRE[d.structure]] ? DIRECTION_DE_LETTRE[d.structure] : aleatoire(Object.keys(DIRECTIONS));
+    const choix = DIRECTIONS[d.structure] ? d.structure : DIRECTIONS[DIRECTION_DE_LETTRE[d.structure]] ? DIRECTION_DE_LETTRE[d.structure] : aleatoire(Object.keys(DIRECTIONS).filter((k) => k !== "sombre" && k !== "ecran")); // au hasard : fonds francs (les sombres seulement sur demande)
     const pers = PERSONNAGES[d.persona || ""] || PERSONNAGES[aleatoire(Object.keys(PERSONNAGES))];
     const personne = `${pers.desc}, wearing ${pers.tenue}`;
     const manuelle = d.idee && !/^Affiche :/i.test(d.idee);
     return [
-      `Vertical ${d.format === "9:16" ? "9:16" : "4:5"} premium social media poster for a parcel delivery app named Delivrou, in the style of a top-tier fintech app advertisement. Leave a clean empty margin around the edges.`,
+      `Vertical ${d.format === "9:16" ? "9:16" : "4:5"} premium social media poster for a parcel delivery app named Delivrou, in the style of a top-tier African delivery or fintech app advertisement.`,
       DIRECTIONS[choix](ligne1, ligne2, d.sous, personne),
       manuelle && `Concept: ${d.idee}.`,
       `Footer text: "Télécharge l'app" and below it "Delivrou" in orange, and "www.delivrou.com".${d.bouton ? ` Small button label if any: "${d.bouton}".` : ""}`,
-      "Every object (smartphone, parcel, person) must be COMPLETELY visible inside the poster, nothing cropped at the edges and nothing hidden behind the footer; the smartphone is whole, upright or slightly tilted, with a clean readable screen.",
+      "LAYOUT, most important: NO EMPTY SPACE. The headline is ENORMOUS: it fills the full width of the poster on 2 to 4 lines and takes at least the top third, with a very small margin. The main visual is LARGE and starts right under the text, filling all the remaining space down to the footer, with no gap. The footer is a thin band at the very bottom of the poster, with nothing below it.",
+      "No text is cut by the edges, and nothing hides the text. The subtitle is large and easy to read on a phone. The smartphone screen stays clean and readable, and no object is hidden behind the footer except the bottom of the smartphone or of the person, who may be cut off by it.",
       "Strong depth, soft shadows, glossy premium 3D render look for the 3D elements, crisp details, realistic hands and faces.",
       "ALL TEXT must be French, spelled EXACTLY as given, with correct accents, and no other text anywhere.",
       "Strict: no logos, no brand names other than Delivrou, no food, meals or pharmacy items, no prices, no delivery times, no numbers, no extra text.",
