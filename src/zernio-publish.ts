@@ -184,6 +184,11 @@ export async function modifierHoraire(qgId: string, date: string, heure: string)
     modifies++;
   }
   if (!modifies) return { ok: false, erreur: "Aucune programmation a modifier : deja publie ou introuvable chez Zernio." };
+  // On relit chez Zernio : on n'annonce jamais une modification qui n'a pas ete enregistree.
+  const relu = await lister();
+  if (relu.ok && relu.posts.some((p) => p.qgId === qgId && p.quand && p.statutPost !== "published" && p.statutPost !== "cancelled" && !p.quand.startsWith(`${date}T${heure}`))) {
+    return { ok: false, erreur: "Zernio a repondu sans changer l'heure. Supprime la publication et reprogramme-la." };
+  }
   return { ok: true, modifies };
 }
 
