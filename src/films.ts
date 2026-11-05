@@ -10,7 +10,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import express, { type Request, type Response } from "express";
-import { askGeminiEmail, askGeminiJson, isGeminiConfigured } from "./gemini.js";
+import { askGeminiCreatif, askGeminiEmail, askGeminiJson, isGeminiConfigured } from "./gemini.js";
 import { verifierRegles, tropProche, legendes } from "./studio.js";
 
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
@@ -115,6 +115,7 @@ const VIGNETTES = ["th-marche", "th-ville", "th-rue"];
 const FINALE: Scene = { type: "fin", lignes: ["Delivrou,", "vite fait.", "Télécharge l'app", "sur delivrou.com."], url: "www.delivrou.com", sousTitres: false };
 
 export const SUJETS: Array<{ id: string; titre: string; note: string }> = [
+  { id: "hasard", titre: "Au hasard : l'IA choisit le sujet", note: "" },
   { id: "colis", titre: "Envoyer un colis en 4 étapes", note: "Le film modèle, avec le texte déjà validé." },
   { id: "points", titre: "Les Deli-points et le parrainage", note: "Inviter un ami : 50 points pour toi, 50 pour lui. 1 point = 100 GNF." },
   { id: "emballage", titre: "Bien emballer son colis", note: "Astuces : emballer, décrire, photographier le colis." },
@@ -152,16 +153,24 @@ function nettoyer(brut: unknown, permises: string[] = Object.keys(NB_LIGNES)): {
   const scenes: Scene[] = [];
   const vus = new Set<string>();
   /** Une scene inutilisable devient un « mot geant » : le script n'echoue plus, et la voix reste entiere. */
+  let voixCourante: string[] = [];
   const repli = (brutes: unknown) => {
     const l = (Array.isArray(brutes) ? brutes : []).map((t) => court(t, 70)).filter(Boolean);
-    for (let i = 0; i < l.length; i += 4) scenes.push({ type: "motgeant", lignes: l.slice(i, i + 4) });
+    // une balise seule sur sa ligne reste avec la phrase d'avant
+    const voix = voixCourante.reduce<string[]>((a, v) => { if (sansBalises(v) || !a.length) a.push(v); else a[a.length - 1] += " " + v; return a; }, []);
+    for (let i = 0; i < l.length; i += 4) {
+      const v = voix.slice(i, i + 4).join(" ");
+      scenes.push({ type: "motgeant", lignes: l.slice(i, i + 4), ...(/[[^]]+]/.test(v) ? { voixBalisee: v } : {}) });
+    }
   };
   const obj = (v: unknown) => (v ?? {}) as Record<string, unknown>;
   for (const x of arr as Array<Record<string, unknown>>) {
     // Les rires ([laughs]…) vont dans le texte pour ElevenLabs, jamais à l'écran.
     delete x.voixBalisee;
+    voixCourante = [];
     if (Array.isArray(x.lignes)) {
       const brutes = x.lignes.map((l) => String(l ?? ""));
+      voixCourante = brutes;
       if (brutes.some((l) => /\[[^\]]+\]/.test(l))) x.voixBalisee = brutes.join(" ").slice(0, 900);
       x.lignes = brutes.map(sansBalises).filter(Boolean);
     }
@@ -239,11 +248,21 @@ export const TONS: Record<string, { nom: string; ia: string; voix: string }> = {
 };
 
 const TONS_QUI_RIENT = ["drole", "rigolo"];
+const SCENES_POUR_RIRE = ["motgeant", "slam", "telephone", "recherche", "fiche", "avantapres", "notifs", "trajet", "note", "bulles", "livreur"];
+const MOTS_PAR_SECONDE = 2.6;
+const motsVises = (duree: number) => Math.round(duree * MOTS_PAR_SECONDE);
+const nbMots = (scenes: Scene[]) => scenes.flatMap((s) => s.lignes).join(" ").split(/\s+/).filter(Boolean).length;
+const nbRires = (scenes: Scene[]) => scenes.reduce((n, s) => n + (String(s.voixBalisee ?? "").match(/\[[^\]]+\]/g)?.length ?? 0), 0);
+const permisesTon = (permises: string[], ton: string) => { if (!TONS_QUI_RIENT.includes(ton)) return permises; const l = permises.filter((p) => SCENES_POUR_RIRE.includes(p)); return l.length >= 3 ? l : permises; };
+const ecrireScript = (ton: string) => (TONS_QUI_RIENT.includes(ton) ? askGeminiCreatif : askGeminiJson);
 const CONSIGNE_HUMOUR = [
   "HUMOUR (aussi important que le hook) : ce film doit faire rire pour de vrai et donner envie de le partager.",
   "Écris au moins 2 vraies blagues plus une chute qui fait éclater de rire. Pas un texte publicitaire avec un sourire : un petit sketch.",
   "Procédés : exagération absurde d'une situation vécue à Conakry, personnage fictif avec un prénom guinéen (le cousin qui se perd, la tantine qui appelle dix fois, le colis qui voyage plus que son propriétaire), dialogue imité, auto-dérision du narrateur, comparaison inattendue.",
   "Interdits dans les blagues : religion, ethnie, politique, handicap, physique, personne réelle, concurrents, et toute moquerie méchante. On rit de la situation, jamais de quelqu'un. Les informations sur Delivrou restent vraies.",
+  "INTERDIT dans ce ton : énumérer les fonctions de l'appli, parler comme une publicité, poser une question sérieuse. Delivrou n'arrive qu'à la fin, en une seule scène : 80 % du film est l'histoire drôle, et la dernière blague utilise Delivrou.",
+  "AVANT d'écrire, invente dans le champ « sketch » la situation absurde en une phrase, et dans le champ « blagues » les 3 répliques les plus drôles, celles qu'on répéterait à un ami. Si une blague ne te fait pas rire, remplace-la.",
+  "EXEMPLE du niveau attendu (ne le recopie pas, invente une autre histoire) : « Mon cousin Mamadou a voulu envoyer du riz à Kipé. [chuckles] Il l'a donné à son ami, qui l'a donné à son oncle, qui l'a donné à un taxi. Ce riz a vu plus de Conakry que moi. [laughs] Le lendemain, le taxi appelle : \"Allô, c'est qui Mamadou ?\" [laughs harder] Maintenant, il suit son colis sur la carte dans Delivrou. Et le riz ne fait plus de tourisme. [giggles] »",
   "LE NARRATEUR RIT : dans le champ lignes, place 3 à 5 balises en tout, en anglais entre crochets, juste avant ou juste après la phrase drôle : [laughs], [chuckles], [giggles], [laughs harder]. Mets-en une dès la scène accroche et une sur la chute. Ces balises ne comptent pas dans les mots, ne s'affichent pas à l'écran et sont jouées par la voix. N'écris jamais « ha ha » en toutes lettres.",
 ].join(" ");
 const sansBalises = (l: string) => l.replace(/\[[^\]]*\]/g, " ").replace(/\s+/g, " ").trim();
@@ -257,16 +276,20 @@ function avecRires(scenes: Scene[], ton: string): Scene[] {
 
 function consigne(sujet: string, note: string, recents: string[], permises: string[], duree = 40, ton = "chaleureux"): string {
   const t = TONS[ton] ?? TONS.chaleureux;
-  const mots = Math.round(duree * 2.6);
+  const mots = motsVises(duree);
+  // Pour rire, il faut raconter : pas de captures ni de listes qui imposent un texte de notice.
+  const pourRire = TONS_QUI_RIENT.includes(ton);
+  permises = permisesTon(permises, ton);
   const nbScenes = duree <= 25 ? "3 à 4" : duree <= 45 ? "4 à 6" : "6 à 9";
   return [
     `Tu écris le script d'un film court d'environ ${duree} secondes de voix (environ ${mots} mots en tout, toutes les lignes confondues) pour Facebook et TikTok, pour Delivrou, service de livraison de COLIS à Conakry. Une voix off lit tout le texte ; l'image est du motion design.`,
     `SUJET : ${sujet}. ${note}`,
     `TON DU FILM : ${t.ia}. Ce ton se sent dès la première ligne et jusqu'au bout. Tutoiement, français simple de Conakry, phrases courtes.`,
     TONS_QUI_RIENT.includes(ton) ? CONSIGNE_HUMOUR : "",
+    `DURÉE OBLIGATOIRE : ${duree} secondes de voix, donc ${mots} mots au total, ni beaucoup moins ni beaucoup plus. Compte-les avant de répondre. Un film trop court est refusé. Chaque ligne est une vraie phrase parlée, jamais une étiquette (« Départ et repère » ou « Paiement sécurisé » sont interdits : on les entendrait lire une notice).`,
     "HOOK PARFAIT (le plus important) : les 3 premières secondes (scène accroche) doivent arrêter le pouce. Une vraie situation vécue, une question qui pique, une contradiction ou une petite blague, dans le ton choisi. Jamais « Salut », « Bonjour », « Bienvenue », « Découvrez », ni un slogan. L'accroche doit donner envie de connaître la suite. Règles de l'accroche : la 1re ligne fait 6 mots maximum et claque (un fait surprenant, une scène du quotidien à Conakry, une erreur que tout le monde fait, une question directe) ; la 2e ligne enfonce le clou ; les lignes 3 et 4 ouvrent une boucle (une question ou une promesse) dont la réponse arrive plus loin dans le film, pour que la personne reste. Pas de politesse, pas de présentation de Delivrou dans l'accroche.",
     "FIN PARFAITE : la dernière scène avant « fin » est la chute : une phrase courte et mémorable qui répond à la question de l'accroche (le bénéfice concret ou une punchline), jamais une phrase molle ou un résumé. Elle prépare l'appel à commenter un mot-clé qui suit automatiquement. Le film doit se terminer sur une envie d'agir, pas sur un silence.",
-    `Scènes autorisées pour CE sujet (et seulement celles-là, en plus de « accroche ») : ${permises.join(", ")}. Choisis les plus pertinentes ; n'utilise pas une scène si elle ne correspond pas au sujet. Les captures d'écran de l'appli (scène « ecran ») sont préférées aux dessins quand elles illustrent le sujet.`,
+    `Scènes autorisées pour CE sujet (et seulement celles-là, en plus de « accroche ») : ${permises.join(", ")}. Choisis les plus pertinentes ; n'utilise pas une scène si elle ne correspond pas au sujet.${pourRire ? "" : " Les captures d'écran de l'appli (scène « ecran ») sont préférées aux dessins quand elles illustrent le sujet."}`,
     `Le film suit une suite de scènes choisies parmi celles-ci (chacune une seule fois sauf « ecran », ${nbScenes} scènes au total, la première est toujours « accroche »). Chaque scène a un nombre EXACT de phrases de voix dans le champ lignes (une phrase ou un morceau de phrase par ligne, de 2 à 9 mots, la ponctuation reste dans la ligne) :`,
     '• accroche (4 lignes) : l\'accroche. Lignes 1 et 2 = la première partie (ex. « À Conakry, » / « personne n\'a d\'adresse. »), lignes 3 et 4 = la question (ex. « Alors, » / « comment on envoie un colis ? »). Champs : objet (colis|repere|scooter|telephone|coche|bulle|bouclier|cloche|enveloppe).',
     '• bulles (2 lignes) : le « avant », des messages qui s\'empilent. Champs : etiquette (ex. "AVANT"), messages (exactement 5 {de:"in"|"out", texte ≤ 22 caractères}), appel (ex. "Appel manqué"), objet, symbole ("?").',
@@ -295,7 +318,7 @@ function consigne(sujet: string, note: string, recents: string[], permises: stri
     "La scène finale « fin » est ajoutée automatiquement : n'écris pas la conclusion et ne mets pas d'appel à télécharger.",
     "RÈGLES STRICTES : le seul service disponible est le COLIS (jamais repas, pharmacie, épicerie) ; aucun délai chiffré ni prix ; aucune promesse de rapidité (jamais « vite », « rapide », « express ») ; aucun chiffre inventé (sauf ceux confirmés : 50 Deli-points par parrainage = 5 000 GNF, 1 point = 100 GNF) ; pas de paiement en espèces ; aucune fausse urgence ; pas de concours ni tirage au sort ; rien de religieux ; pas de faux avis ni témoignage. Les phrases doivent être vraies : coursiers vérifiés, point de repère, photo du colis (preuve), prix affiché avant de valider, paiement mobile, suivi en direct, code de retrait et de livraison.",
     recents.length ? `Accroches déjà utilisées (n'en répète ni les mots ni l'idée, trouve un autre angle) :\n${recents.map((r) => "- " + r).join("\n")}` : "",
-    'Réponds UNIQUEMENT par un objet JSON valide : {"titre":"","scenes":[{"type":"accroche","lignes":["","","",""],"objet":"colis"}, {"type":"ecran","lignes":["",""],"image":"envoi-depart","etapes":[{"zone":"commune","saisie":"Kaloum"},{"zone":"suivant"}]}, ...]}',
+    'Réponds UNIQUEMENT par un objet JSON valide : {"sketch":"","blagues":[""],"titre":"","scenes":[{"type":"accroche","lignes":["","","",""],"objet":"colis"}, ' + (pourRire ? '{"type":"motgeant","lignes":["",""]}' : '{"type":"ecran","lignes":["",""],"image":"envoi-depart","etapes":[{"zone":"commune","saisie":"Kaloum"},{"zone":"suivant"}]}') + ', ...]}',
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -409,7 +432,7 @@ filmsRouter.post("/script", express.json({ limit: "64kb" }), async (req: Request
   const ton = TONS[String(b.ton)] ? String(b.ton) : "chaleureux";
   let titre = preset?.titre ?? libre ?? "Film";
   let scenes: Scene[];
-  if (sujetId === "colis") {
+  if (sujetId === "colis" && !TONS_QUI_RIENT.includes(ton)) {
     scenes = PRESET_COLIS;
   } else {
     if (!isGeminiConfigured()) {
@@ -423,20 +446,41 @@ filmsRouter.post("/script", express.json({ limit: "64kb" }), async (req: Request
     const recents = tous().slice(0, 8).map((f) => f.scenes[0]?.lignes.join(" ") ?? "").filter(Boolean);
     let ok: Scene[] | null = null;
     let dernier = "";
-    for (let essai = 0; essai < 3 && !ok; essai++) {
-      const r = await askGeminiJson(consigne(sujetId === "libre" ? libre : (preset?.titre ?? libre), preset?.note ?? "", recents, permisesNotees(sujetId), duree, ton) + "\n" + consigneVariete());
+    let rappel = "";
+    let meilleur: { scenes: Scene[]; titre: string } | null = null;
+    const vise = motsVises(duree);
+    const sujetTexte = sujetId === "libre" ? libre : sujetId === "hasard" ? "choisis toi-même un sujet original et utile sur l'envoi de colis avec Delivrou, à partir des faits donnés plus haut" : (preset?.titre ?? libre);
+    const noteSujet = sujetId === "hasard" ? `Sujets déjà traités, à ne pas reprendre : ${tous().slice(0, 12).map((f) => f.titre).join(" ; ") || "aucun"}. Écris dans « titre » le sujet que tu as choisi.` : (preset?.note ?? "");
+    for (let essai = 0; essai < 4 && !ok; essai++) {
+      const r = await ecrireScript(ton)(consigne(sujetTexte, noteSujet, recents, permisesNotees(sujetId), duree, ton) + "\n" + consigneVariete() + rappel);
       const o = r.ok && r.text ? extraire(r.text) : null;
       if (!o) { dernier = r.error || "Réponse illisible."; continue; }
-      const { scenes: sc, erreurs } = nettoyer(o.scenes, permisesNotees(sujetId));
+      const { scenes: sc, erreurs } = nettoyer(o.scenes, permisesTon(permisesNotees(sujetId), ton));
       if (sc.length < 3 || sc[0].type !== "accroche") { dernier = erreurs[0] || "Il faut au moins 3 scènes et une accroche."; continue; }
       { const faible = accrocheFaible(sc[0].lignes); if (faible) { dernier = faible; continue; } }
       const textes = JSON.stringify(sc.map((s) => ({ ...s, type: undefined })));
       const alertes = verifierRegles(textes);
       if (alertes.length) { dernier = alertes[0]; continue; }
       if (recents.some((r2) => tropProche(r2, sc[0].lignes.join(" ")))) { dernier = "Accroche trop proche d'une récente."; continue; }
-      titre = court(o.titre, 80) || titre;
-      ok = avecRires([...sc, FINALE], ton);
+      const candidat = [...sc, FINALE];
+      const titreIA = court(o.titre, 80);
+      const nb = nbMots(candidat);
+      if (!meilleur || Math.abs(nb - vise) < Math.abs(nbMots(meilleur.scenes) - vise)) meilleur = { scenes: candidat, titre: titreIA };
+      if (nb < vise * 0.8 || nb > vise * 1.25) {
+        dernier = `${nb} mots au lieu de ${vise}.`;
+        rappel = `\n\nATTENTION : ton essai précédent faisait ${nb} mots. Il en faut ${vise} : ${nb < vise ? "raconte plus, ajoute des scènes et des phrases" : "raccourcis"}.`;
+        continue;
+      }
+      if (TONS_QUI_RIENT.includes(ton) && nbRires(sc) < 2) {
+        dernier = "Pas assez de rires.";
+        rappel = "\n\nATTENTION : ton essai précédent n'avait pas assez de balises [laughs], [chuckles], [giggles] dans les lignes. Il en faut 3 à 5.";
+        continue;
+      }
+      titre = titreIA || titre;
+      ok = avecRires(candidat, ton);
     }
+    // Durée approchée seulement après plusieurs essais : mieux vaut un script à retoucher qu'une erreur.
+    if (!ok && meilleur && nbMots(meilleur.scenes) >= vise * 0.55) { titre = meilleur.titre || titre; ok = avecRires(meilleur.scenes, ton); }
     if (!ok) {
       res.status(422).json({ ok: false, erreur: "Le script n'a pas pu être écrit : " + dernier });
       return;
@@ -566,10 +610,10 @@ filmsRouter.post("/:id/refaire", express.json({ limit: "8kb" }), async (req: Req
   let ok: Scene[] | null = null;
   let dernier = "";
   for (let essai = 0; essai < 3 && !ok; essai++) {
-    const r = await askGeminiJson(consigne(f.titre, note, [], permises, f.duree ?? 40, f.ton ?? "chaleureux"));
+    const r = await ecrireScript(f.ton ?? "")(consigne(f.titre, note, [], permises, f.duree ?? 40, f.ton ?? "chaleureux"));
     const o = r.ok && r.text ? extraire(r.text) : null;
     if (!o) { dernier = r.error || "Réponse illisible."; continue; }
-    const { scenes: sc, erreurs } = nettoyer(o.scenes, permises);
+    const { scenes: sc, erreurs } = nettoyer(o.scenes, permisesTon(permises, f.ton ?? ""));
     if (sc.length < 3 || sc[0].type !== "accroche") { dernier = erreurs[0] || "Il faut au moins 3 scènes et une accroche."; continue; }
     { const faible = accrocheFaible(sc[0].lignes); if (faible) { dernier = faible; continue; } }
     const alertes = verifierRegles(JSON.stringify(sc.map((s) => ({ ...s, type: undefined }))));
@@ -661,4 +705,4 @@ filmsMachineRouter.post("/:id/progression", express.json({ limit: "8kb" }), (req
   res.json({ ok: true });
 });
 
-export const _test = { nettoyer, toutesLesLignes };
+export const _test = { nettoyer, toutesLesLignes, nbMots, nbRires, avecRires };

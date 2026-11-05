@@ -14,6 +14,8 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 // que "flash" standard), largement suffisant pour de courts brouillons
 // WhatsApp. Changez via la variable d'environnement GEMINI_MODEL si besoin.
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+// L'humour demande un modele plus fort que les reponses WhatsApp. S'il n'existe pas, on retombe sur le modele normal.
+const GEMINI_MODEL_CREATIF = process.env.GEMINI_MODEL_CREATIF || "gemini-3.5-flash";
 
 export function isGeminiConfigured(): boolean {
   return Boolean(GEMINI_API_KEY);
@@ -117,7 +119,7 @@ function withKnowledge(prompt: string): string {
   return k ? `${prompt}\n\n${k}` : prompt;
 }
 
-async function callGemini(prompt: string, mode: "whatsapp" | "email" | "json" = "whatsapp"): Promise<{ ok: boolean; text?: string; error?: string }> {
+async function callGemini(prompt: string, mode: "whatsapp" | "email" | "json" | "creatif" = "whatsapp"): Promise<{ ok: boolean; text?: string; error?: string }> {
   if (!GEMINI_API_KEY) {
     return { ok: false, error: "GEMINI_API_KEY non configurée sur le serveur." };
   }
@@ -131,19 +133,22 @@ async function callGemini(prompt: string, mode: "whatsapp" | "email" | "json" = 
   // raisonnement au minimum ; si l'API rejette ce parametre (non supporte
   // selon la version du modele/endpoint), on reessaie sans, pour ne jamais
   // perdre la suggestion a cause d'un reglage non reconnu.
-  const attempts = [{ thinkingConfig: { thinkingLevel: "low" } }, {}];
+  const enJson = mode === "json" || mode === "creatif";
+  const attempts: Array<{ modele: string; config: Record<string, unknown> }> = mode === "creatif"
+    ? [{ modele: GEMINI_MODEL_CREATIF, config: { thinkingConfig: { thinkingLevel: "medium" } } }, { modele: GEMINI_MODEL_CREATIF, config: {} }, { modele: GEMINI_MODEL, config: {} }]
+    : [{ modele: GEMINI_MODEL, config: { thinkingConfig: { thinkingLevel: "low" } } }, { modele: GEMINI_MODEL, config: {} }];
 
   let lastError = "Reponse IA indisponible.";
-  for (const extraConfig of attempts) {
+  for (const { modele, config: extraConfig } of attempts) {
     try {
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${modele}:generateContent?key=${GEMINI_API_KEY}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [{ parts: [{ text: withKnowledge(prompt) }] }],
-            generationConfig: { temperature: 0.6, maxOutputTokens: mode === "json" ? 8192 : 2048, ...(mode === "json" ? { responseMimeType: "application/json" } : {}), ...extraConfig },
+            generationConfig: { temperature: mode === "creatif" ? 1 : 0.6, maxOutputTokens: enJson ? 8192 : 2048, ...(enJson ? { responseMimeType: "application/json" } : {}), ...extraConfig },
           }),
         },
       );
@@ -277,6 +282,11 @@ export async function askGemini(instruction: string): Promise<{ ok: boolean; tex
 /** Reponse longue et structuree (script de film) : Gemini est tenu de renvoyer du JSON valide. */
 export async function askGeminiJson(instruction: string): Promise<{ ok: boolean; text?: string; error?: string }> {
   return callGemini(`${COMPANY_CONTEXT}\n\n${instruction}`, "json");
+}
+
+/** Comme askGeminiJson, avec plus d'inventivite : pour les scripts qui doivent faire rire. */
+export async function askGeminiCreatif(instruction: string): Promise<{ ok: boolean; text?: string; error?: string }> {
+  return callGemini(`${COMPANY_CONTEXT}\n\n${instruction}`, "creatif");
 }
 
 export async function askGeminiEmail(instruction: string): Promise<{ ok: boolean; text?: string; error?: string }> {
