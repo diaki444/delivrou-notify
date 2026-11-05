@@ -160,7 +160,7 @@ function nettoyer(brut: unknown, permises: string[] = Object.keys(NB_LIGNES)): {
     const voix = voixCourante.reduce<string[]>((a, v) => { if (sansBalises(v) || !a.length) a.push(v); else a[a.length - 1] += " " + v; return a; }, []);
     for (let i = 0; i < l.length; i += 4) {
       const v = voix.slice(i, i + 4).join(" ");
-      scenes.push({ type: "motgeant", lignes: l.slice(i, i + 4), ...(/[[^]]+]/.test(v) ? { voixBalisee: v } : {}) });
+      scenes.push({ type: "motgeant", lignes: l.slice(i, i + 4), ...(v !== sansBalises(v) ? { voixBalisee: v } : {}) });
     }
   };
   const obj = (v: unknown) => (v ?? {}) as Record<string, unknown>;
