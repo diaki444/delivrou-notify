@@ -63,6 +63,7 @@ const supprimerFichiers = (id: string) => {
   } catch { /* deja supprime */ }
 };
 
+export const tousJobs = () => tous();
 export const affichesCapturesRouter = express.Router();
 affichesCapturesRouter.get("/", (_req, res) => {
   res.set("Cache-Control", "no-store");

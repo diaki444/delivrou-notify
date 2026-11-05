@@ -115,6 +115,7 @@ const PERSOS = ["per-livreur2", "per-maman", "per-jeune-femme"];
 const VIGNETTES = ["th-marche", "th-ville", "th-rue"];
 const FINALE: Scene = { type: "fin", lignes: ["Delivrou,", "vite fait.", "Télécharge l'app", "sur delivrou.com."], url: "www.delivrou.com", sousTitres: false };
 
+export const tousFilms = () => tous();
 export const SUJETS: Array<{ id: string; titre: string; note: string }> = [
   { id: "hasard", titre: "Au hasard : l'IA choisit le sujet", note: "" },
   { id: "colis", titre: "Envoyer un colis en 4 étapes", note: "Le film modèle, avec le texte déjà validé." },
