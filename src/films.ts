@@ -109,7 +109,8 @@ const NB_LIGNES: Record<string, (s: Scene) => number> = {
   notifs: (s) => borne(s.lignes.length, 2, 4), liste: (s) => borne(s.lignes.length, 2, 4), note: (s) => borne(s.lignes.length, 2, 4),
   recherche: () => 3, fiche: () => 3, trajet: () => 3, sondage: () => 3, avantapres: () => 2, compteur: () => 2,
 };
-const OBJETS = ["colis", "repere", "scooter", "telephone", "coche", "bulle", "bouclier", "cloche", "enveloppe"];
+const OBJETS = ["colis", "repere", "scooter", "telephone", "coche", "bulle", "bouclier", "cloche", "enveloppe", "cle", "casque", "coeur", "etoile", "fusee", "horloge"];
+const HEROS_IA = "per-ado, per-commercant, per-entrepreneur, per-etudiante, per-jeune-femme, per-livreur2, per-livreuse, per-maman, per-papa";
 const PERSOS = ["per-livreur2", "per-maman", "per-jeune-femme"];
 const VIGNETTES = ["th-marche", "th-ville", "th-rue"];
 const FINALE: Scene = { type: "fin", lignes: ["Delivrou,", "vite fait.", "Télécharge l'app", "sur delivrou.com."], url: "www.delivrou.com", sousTitres: false };
@@ -263,6 +264,7 @@ const CONSIGNE_HUMOUR = [
   "INTERDIT dans ce ton : énumérer les fonctions de l'appli, parler comme une publicité, poser une question sérieuse. Delivrou n'arrive qu'à la fin, en une seule scène : 80 % du film est l'histoire drôle, et la dernière blague utilise Delivrou.",
   "AVANT d'écrire, invente dans le champ « sketch » la situation absurde en une phrase, et dans le champ « blagues » les 3 répliques les plus drôles, celles qu'on répéterait à un ami. Si une blague ne te fait pas rire, remplace-la.",
   "EXEMPLE du niveau attendu (ne le recopie pas, invente une autre histoire) : « Mon cousin Mamadou a voulu envoyer du riz à Kipé. [chuckles] Il l'a donné à son ami, qui l'a donné à son oncle, qui l'a donné à un taxi. Ce riz a vu plus de Conakry que moi. [laughs] Le lendemain, le taxi appelle : \"Allô, c'est qui Mamadou ?\" [laughs harder] Maintenant, il suit son colis sur la carte dans Delivrou. Et le riz ne fait plus de tourisme. [giggles] »",
+  `Dans la scène accroche, ajoute le champ « perso » : le personnage dessiné qui joue le héros, cohérent avec son prénom et son âge, parmi : ${HEROS_IA}.`,
   "LE NARRATEUR RIT : dans le champ lignes, place 3 à 5 balises en tout, en anglais entre crochets, juste avant ou juste après la phrase drôle : [laughs], [chuckles], [giggles], [laughs harder]. Mets-en une dès la scène accroche et une sur la chute. Ces balises ne comptent pas dans les mots, ne s'affichent pas à l'écran et sont jouées par la voix. N'écris jamais « ha ha » en toutes lettres.",
 ].join(" ");
 const sansBalises = (l: string) => l.replace(/\[[^\]]*\]/g, " ").replace(/\s+/g, " ").trim();
