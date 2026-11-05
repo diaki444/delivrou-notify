@@ -1,5 +1,5 @@
 /**
- * Programmation des posts du QG sur Facebook et TikTok, via Zernio.
+ * Programmation des posts du QG sur Facebook (publication et story) et TikTok, via Zernio.
  *
  * Le calendrier du QG envoie un post (date, heure, fichier, legende) ; ce
  * module envoie le fichier a Zernio puis cree le post programme. Rien n'est
@@ -19,7 +19,7 @@ const TIMEZONE = "Africa/Conakry";
 /** Marge minimale : Zernio publie tout de suite une date deja passee. */
 const MIN_LEAD_MS = 5 * 60_000;
 
-export type Reseau = "fb" | "tt";
+export type Reseau = "fb" | "tt" | "story";
 export type ModeTikTok = "brouillon" | "direct";
 
 export interface DemandeProgrammation {
@@ -43,7 +43,7 @@ export interface ResultatReseau {
   erreur?: string;
 }
 
-const PLATEFORME: Record<Reseau, string> = { fb: "facebook", tt: "tiktok" };
+const PLATEFORME: Record<Reseau, string> = { fb: "facebook", tt: "tiktok", story: "facebook" };
 const MIME: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".mp4": "video/mp4" };
 
 /** Fichier du QG autorise : uniquement sous media/ ou studio/creations/, jamais en dehors du dossier. */
@@ -94,7 +94,7 @@ export function verifierDemande(d: DemandeProgrammation, maintenant = Date.now()
   if (!Number.isFinite(quand)) return "Date ou heure illisible.";
   if (quand < maintenant + MIN_LEAD_MS) return "L'heure est deja passee (ou dans moins de 5 minutes) : Zernio publierait tout de suite. Reportez le post d'abord.";
   if (!Array.isArray(d.reseaux) || d.reseaux.length === 0) return "Aucun reseau choisi.";
-  if (d.reseaux.some((r) => r !== "fb" && r !== "tt")) return "Reseau inconnu.";
+  if (d.reseaux.some((r) => r !== "fb" && r !== "tt" && r !== "story")) return "Reseau inconnu.";
   return null;
 }
 
@@ -116,7 +116,7 @@ async function supprimerAnciens(qgId: string, reseau: Reseau): Promise<string | 
 
 async function programmerUn(d: DemandeProgrammation, reseau: Reseau): Promise<ResultatReseau> {
   const plateforme = PLATEFORME[reseau];
-  const rel = reseau === "tt" ? d.tiktokFile || d.facebookFile : d.facebookFile;
+  const rel = reseau === "fb" ? d.facebookFile : d.tiktokFile || d.facebookFile;
   const full = rel ? resoudreFichier(rel) : null;
   if (!full) return { reseau, ok: false, erreur: "Fichier du post introuvable sur le serveur." };
 
@@ -128,11 +128,12 @@ async function programmerUn(d: DemandeProgrammation, reseau: Reseau): Promise<Re
   const media = await televerser(full);
   if (!media.ok) return { reseau, ok: false, erreur: media.erreur };
 
-  const texte = (reseau === "tt" ? d.tiktok : d.facebook) || "";
+  // Facebook n'affiche pas de legende sur une story : le message doit etre dans l'image.
+  const texte = reseau === "story" ? "" : (reseau === "tt" ? d.tiktok : d.facebook) || "";
   const corps: Record<string, unknown> = {
     content: texte,
     mediaItems: [{ type: media.mime.startsWith("video/") ? "video" : "image", url: media.url }],
-    platforms: [{ platform: plateforme, accountId: compte.compte.id }],
+    platforms: [{ platform: plateforme, accountId: compte.compte.id, ...(reseau === "story" ? { platformSpecificData: { contentType: "story" } } : {}) }],
     scheduledFor: `${d.date}T${d.heure}:00Z`,
     timezone: TIMEZONE,
     metadata: { qgId: d.id, qgReseau: reseau },
