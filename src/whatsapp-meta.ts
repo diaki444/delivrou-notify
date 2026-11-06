@@ -21,7 +21,7 @@ import crypto from "node:crypto";
 import { recordMessage, upsertChat, getMessages, getChat, setSuggestedReply, findProspectByPhone } from "./store.js";
 import { isGeminiConfigured, suggestReply } from "./gemini.js";
 import { CATEGORY_LABELS } from "./categories.js";
-import { notifyAllSubscriptions } from "./push.js";
+import { notifier } from "./notifications.js";
 
 const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
 const ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
@@ -270,11 +270,7 @@ class MetaClient {
     if (senderName) upsertChat(jid, { name: senderName });
     recordMessage({ id, chatJid: jid, fromMe: false, senderName, text, timestamp });
     if (isGeminiConfigured()) void this.suggest(jid);
-    void notifyAllSubscriptions({
-      title: senderName || getChat(jid)?.name || "Nouveau message WhatsApp",
-      body: text.slice(0, 140),
-      url: `/dashboard/chat/${encodeURIComponent(jid)}`,
-    }).catch(() => {});
+    notifier("whatsapp", senderName || getChat(jid)?.name || "Nouveau message WhatsApp", text, "/qg#messages");
   }
 
   private async suggest(jid: string) {

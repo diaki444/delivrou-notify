@@ -13,7 +13,7 @@ import makeWASocket, {
 import { recordMessage, upsertChat, getMessages, getChat, setSuggestedReply, findProspectByPhone } from "./store.js";
 import { isGeminiConfigured, suggestReply } from "./gemini.js";
 import { CATEGORY_LABELS } from "./categories.js";
-import { notifyAllSubscriptions } from "./push.js";
+import { notifier } from "./notifications.js";
 import { metaClient } from "./whatsapp-meta.js";
 import { traiterMessageWhatsapp } from "./declencheurs.js";
 
@@ -146,11 +146,7 @@ class WhatsAppClient {
       void traiterMessageWhatsapp(jid, text, senderName, (j, t2) => this.sendText(j, t2)).catch(() => {});
       if (isGeminiConfigured()) void this.generateReplySuggestion(jid);
       const displayName = this.contactNames.get(jid) || senderName || getChat(jid)?.name;
-      void notifyAllSubscriptions({
-        title: displayName || "Nouveau message WhatsApp",
-        body: text.slice(0, 140),
-        url: `/dashboard/chat/${encodeURIComponent(jid)}`,
-      }).catch(() => {});
+      notifier("whatsapp", displayName || "Nouveau message WhatsApp", text, "/qg#messages");
     }
   }
 

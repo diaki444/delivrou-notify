@@ -14,6 +14,7 @@ import { sendOtp } from "./otp.js";
 import { metaClient, type IncomingWebhook } from "./whatsapp-meta.js";
 import { startStatsCollector, collectNow, getLatestByPlatform, weeklySeries, getLastRun } from "./stats.js";
 import { demarrerConseils } from "./conseils.js";
+import { demarrerNotifications } from "./notifications.js";
 import { probe as zernioProbe } from "./zernio.js";
 
 const PORT = Number(process.env.PORT || 3300);
@@ -315,6 +316,9 @@ startStatsCollector();
 
 // Toutes les 6 heures : ce qui marche, ce qui ne marche pas, et quoi faire ensuite.
 demarrerConseils();
+
+// Notifications sur le telephone : commentaires, publications en echec, PC injoignable (releve toutes les 5 min).
+demarrerNotifications();
 
 // Boite email du QG (inactive tant que GMAIL_USER / GMAIL_APP_PASSWORD sont absents).
 startEmailPolling();

@@ -15,6 +15,7 @@ import path from "node:path";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import nodemailer from "nodemailer";
+import { notifier } from "./notifications.js";
 import { askGeminiEmail, isGeminiConfigured } from "./gemini.js";
 
 const USER = process.env.GMAIL_USER;
@@ -189,6 +190,8 @@ export function waitingThreads() {
     }));
 }
 
+let premierReleve = true;
+const nouveaux: MailMessage[] = [];
 function addMessage(m: MailMessage, unread: boolean) {
   const contact = m.fromMe ? m.to : m.from;
   if (!contact) return;
@@ -218,6 +221,7 @@ function addMessage(m: MailMessage, unread: boolean) {
   t.lastFromMe = last.fromMe;
   t.lastText = last.text.replace(/\s+/g, " ").slice(0, 400);
   if (!m.fromMe && unread) {
+    if (!premierReleve) nouveaux.push(m);
     t.unread = true;
     t.archived = false;
     t.draft = undefined; // nouveau message : l'ancien brouillon ne convient plus
@@ -294,6 +298,15 @@ async function pull(client: ImapFlow, box: string, fromMe: boolean, since: Date)
 }
 
 /** Relit la boite : recus des 14 derniers jours et envoyes, pour voir qui a deja repondu. */
+/** Après chaque relevé : une notification (groupée s'il y en a plusieurs). */
+function annoncerNouveaux() {
+  if (premierReleve) { premierReleve = false; nouveaux.length = 0; return; }
+  if (!nouveaux.length) return;
+  const m = nouveaux[0];
+  notifier("email", nouveaux.length > 1 ? `${nouveaux.length} nouveaux emails` : `Email · ${m.fromName || m.from}`, nouveaux.length > 1 ? nouveaux.map((x) => x.fromName || x.from).join(", ") : m.subject || m.text, "/qg#emails");
+  nouveaux.length = 0;
+}
+
 export async function syncEmails(): Promise<{ ok: boolean; error?: string }> {
   if (!isEmailConfigured()) return { ok: false, error: "GMAIL_USER / GMAIL_APP_PASSWORD non configures sur le serveur." };
   if (syncing) return { ok: true };
@@ -305,6 +318,7 @@ export async function syncEmails(): Promise<{ ok: boolean; error?: string }> {
     await pull(client, "INBOX", false, since);
     await pull(client, "[Gmail]/Sent Mail", true, since);
     await pull(client, "[Gmail]/Messages envoyés", true, since);
+    annoncerNouveaux();
     lastSync = Date.now();
     lastError = null;
     save();

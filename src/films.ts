@@ -11,6 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import express, { type Request, type Response } from "express";
 import { askGeminiCreatif, askGeminiEmail, askGeminiJson, isGeminiConfigured } from "./gemini.js";
+import { notifier } from "./notifications.js";
 import { verifierRegles, tropProche, legendes } from "./studio.js";
 
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
@@ -48,6 +49,7 @@ export interface Film {
 }
 /** Derniere fois que le PC de fabrication est venu regarder le QG (memoire du serveur). */
 let dernierPassagePc = 0;
+export const pcVuFilms = () => dernierPassagePc;
 
 const dossier = (id: string) => path.join(FILMS_DIR, id.replace(/[^a-z0-9-]/gi, ""));
 const lire = (id: string): Film | null => {
@@ -691,6 +693,8 @@ filmsMachineRouter.post("/:id/statut", express.json({ limit: "16kb" }), (req: Re
   if (st === "pret") { f.progression = 100; f.etape = "Terminé"; f.restantS = 0; }
   if (st === "pret") { f.fichier = `films/${f.id}/film.mp4`; delete f.erreur; }
   if (st === "echec") f.erreur = court(b.erreur, 300);
+  if (st === "pret") notifier("production", "Ta vidéo est prête", `« ${f.titre} » t'attend dans le Studio, prête à programmer.`, "/qg#studio");
+  if (st === "echec") notifier("production", "La vidéo n'a pas pu être faite", `« ${f.titre} » : ${f.erreur || "erreur inconnue"}`, "/qg#studio");
   ecrire(f);
   res.json({ ok: true });
 });

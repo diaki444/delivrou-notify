@@ -8,6 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import express, { type Request, type Response } from "express";
 import { legendesIA, legendesModele, type Legs } from "./films.js";
+import { notifier } from "./notifications.js";
 import { verifierRegles } from "./studio.js";
 
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
@@ -42,6 +43,7 @@ const tous = (): Job[] => {
 const c = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
 const catalogue = (): unknown => { try { return JSON.parse(fs.readFileSync(CATALOGUE, "utf8")); } catch { return { sujets: [], layouts: [], fonds: [] }; } };
 let dernierPassagePc = 0;
+export const pcVuAffiches = () => dernierPassagePc;
 
 /** Reglages saisis dans le QG : on ne garde que du texte court, et les memes regles de marque que partout. */
 function nettoyerReglages(b: unknown): Reglages | { erreur: string } {
@@ -156,5 +158,7 @@ affichesMachineRouter.post("/:id/statut", express.json({ limit: "8kb" }), (req: 
   if (st === "pret") { j.fichier = c(b.fichier, 120); j.fichier2 = c(b.fichier2, 120) || undefined; j.titre = c(b.titre, 120); j.texte = c(b.texte, 400); j.sujet = c(b.sujet, 20); j.layout = c(b.layout, 20); j.fond = c(b.fond, 20); j.perso = c(b.perso, 24) || undefined; delete j.erreur; }
   if (st === "echec") j.erreur = c(b.erreur, 200);
   ecrire(j);
+  if (st === "pret") notifier("production", "Ton affiche est prête", `« ${j.titre ?? "Affiche"} » t'attend dans le Studio, prête à programmer.`, "/qg#studio");
+  if (st === "echec") notifier("production", "L'affiche n'a pas pu être faite", j.erreur || "erreur inconnue", "/qg#studio");
   res.json({ ok: true });
 });

@@ -56,13 +56,12 @@ function expliquer(status: number | undefined, erreur: string): { code: string; 
 }
 
 /** Les commentaires recents des derniers posts, avec ceux qui attendent encore une reponse. */
-commentairesRouter.get("/", async (_req, res) => {
-  res.set("Cache-Control", "no-store");
+/** Les commentaires recents des derniers posts (sans les notres). */
+export async function lireCommentaires(): Promise<{ ok: true; commentaires: CommentaireQg[]; avertissements: string[] } | { ok: false; code: string; error: string }> {
   const liste = await zernioRequest<{ data?: PostCommente[] }>("GET", `/v1/inbox/comments?minComments=1&limit=${MAX_POSTS}`);
   if (!liste.ok) {
     const e = expliquer(liste.status, liste.error);
-    res.status(502).json({ ok: false, code: e.code, error: e.message });
-    return;
+    return { ok: false, code: e.code, error: e.message };
   }
   const posts = (liste.data?.data ?? []).slice(0, MAX_POSTS);
   const commentaires: CommentaireQg[] = [];
@@ -90,7 +89,14 @@ commentairesRouter.get("/", async (_req, res) => {
     }
   }
   commentaires.sort((a, b) => Number(a.repondu) - Number(b.repondu) || String(b.date).localeCompare(String(a.date)));
-  res.json({ ok: true, commentaires, avertissements, ia: isGeminiConfigured() });
+  return { ok: true, commentaires, avertissements };
+}
+
+commentairesRouter.get("/", async (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  const r = await lireCommentaires();
+  if (!r.ok) { res.status(502).json({ ok: false, code: r.code, error: r.error }); return; }
+  res.json({ ...r, ia: isGeminiConfigured() });
 });
 
 /** Propose une reponse (jamais envoyee toute seule). */

@@ -22,19 +22,19 @@ self.addEventListener("push", (event) => {
   } catch (err) {
     data = {};
   }
-  const title = data.title || "Delivrou Notify";
+  const title = data.title || "QG Delivrou";
   const options = {
     body: data.body || "Nouveau message",
     icon: "/icon-192.png",
     badge: "/icon-192.png",
-    data: { url: data.url || "/dashboard" },
+    data: { url: data.url || "/qg" },
   };
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = (event.notification.data && event.notification.data.url) || "/dashboard";
+  const url = (event.notification.data && event.notification.data.url) || "/qg";
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
       for (const client of list) {
