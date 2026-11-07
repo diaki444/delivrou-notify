@@ -7,7 +7,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import express, { type Request, type Response } from "express";
-import { getVapidPublicKey, isPushConfigured, notifyAllSubscriptions } from "./push.js";
+import { dernierEnvoi, getVapidPublicKey, isPushConfigured, notifyAllSubscriptions } from "./push.js";
 import { addPushSubscription, listPushSubscriptions, removePushSubscriptionByEndpoint } from "./store.js";
 import { isZernioConfigured } from "./zernio.js";
 import { lister } from "./zernio-publish.js";
@@ -87,7 +87,7 @@ notificationsRouter.use(express.json({ limit: "16kb" }));
 
 notificationsRouter.get("/", (_req: Request, res: Response) => {
   const e = lire();
-  res.json({ ok: true, configure: isPushConfigured(), cle: getVapidPublicKey() ?? null, appareils: listPushSubscriptions().length, types: Object.entries(TYPES).map(([id, nom]) => ({ id, nom, actif: !e.coupes.includes(id as TypeNotif) })) });
+  res.json({ ok: true, configure: isPushConfigured(), cle: getVapidPublicKey() ?? null, appareils: listPushSubscriptions().length, dernierEnvoi: dernierEnvoi(), types: Object.entries(TYPES).map(([id, nom]) => ({ id, nom, actif: !e.coupes.includes(id as TypeNotif) })) });
 });
 
 notificationsRouter.post("/abonner", (req: Request, res: Response) => {
@@ -105,8 +105,8 @@ notificationsRouter.post("/desabonner", (req: Request, res: Response) => {
 
 notificationsRouter.post("/tester", async (_req: Request, res: Response) => {
   if (!isPushConfigured()) { res.status(503).json({ ok: false, erreur: "Les clés VAPID ne sont pas configurées sur le serveur." }); return; }
-  await notifyAllSubscriptions({ title: "QG Delivrou", body: "Les notifications marchent sur ce téléphone.", url: "/qg" });
-  res.json({ ok: true, appareils: listPushSubscriptions().length });
+  const r = await notifyAllSubscriptions({ title: "QG Delivrou", body: "Les notifications marchent sur ce téléphone.", url: "/qg" });
+  res.json({ ok: true, appareils: listPushSubscriptions().length, envoi: r });
 });
 
 notificationsRouter.post("/types", (req: Request, res: Response) => {

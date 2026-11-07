@@ -168,6 +168,15 @@ qgRouter.delete("/file/*", requireNotifyKey, (req, res) => {
 qgRouter.use("/machine/films", requireNotifyKey, filmsMachineRouter);
 qgRouter.use("/machine/affiches", requireNotifyKey, affichesMachineRouter);
 
+// Icone et manifeste de l'appli installee : le telephone les lit sans etre connecte.
+// Sans eux, l'iPhone garde l'ancienne icone et peut refuser les notifications.
+const PUBLICS: Record<string, string> = { "/manifest.json": "application/manifest+json", "/icone-180.png": "image/png", "/icone-192.png": "image/png", "/icone-512.png": "image/png", "/favicon.png": "image/png" };
+qgRouter.get(Object.keys(PUBLICS), (req, res) => {
+  const full = path.join(QG_DIR, path.basename(req.path));
+  if (!fs.existsSync(full)) { res.status(404).type("txt").send("Not found"); return; }
+  res.type(PUBLICS[req.path]).set("Cache-Control", "public, max-age=3600").sendFile(full);
+});
+
 // --- A partir d'ici : reserve a Ibrahima et Bachir (mot de passe) ---
 qgRouter.use(requireDashboardAuth);
 

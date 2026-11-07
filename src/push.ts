@@ -27,21 +27,29 @@ if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
   webpush.setVapidDetails(VAPID_CONTACT_EMAIL, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 }
 
+export interface ResultatEnvoi { date: string; appareils: number; recus: number; erreurs: string[] }
+let dernier: ResultatEnvoi | null = null;
+export const dernierEnvoi = () => dernier;
+
 /** Envoie une notification a tous les appareils abonnes (en general 1-2 : le ou les telephones du gerant). */
 export async function notifyAllSubscriptions(payload: {
   title: string;
   body: string;
   url?: string;
-}): Promise<void> {
-  if (!isPushConfigured()) return;
+}): Promise<ResultatEnvoi | null> {
+  if (!isPushConfigured()) return null;
   const subs = listPushSubscriptions();
   const data = JSON.stringify(payload);
+  const res: ResultatEnvoi = { date: new Date().toISOString(), appareils: subs.length, recus: 0, erreurs: [] };
   await Promise.all(
     subs.map(async (sub) => {
       try {
         await webpush.sendNotification(toPushSubscription(sub), data);
+        res.recus++;
       } catch (err) {
         const statusCode = (err as { statusCode?: number })?.statusCode;
+        const hote = (() => { try { return new URL(sub.endpoint).host; } catch { return "?"; } })();
+        res.erreurs.push(`${hote} : ${statusCode ?? ""} ${String((err as { body?: unknown })?.body ?? (err as Error)?.message ?? "").slice(0, 120)}`.trim());
         if (statusCode === 404 || statusCode === 410) {
           // Abonnement expire/revoque (appli desinstallee, permission retiree...) : on l'oublie.
           removePushSubscriptionByEndpoint(sub.endpoint);
@@ -52,6 +60,8 @@ export async function notifyAllSubscriptions(payload: {
       }
     }),
   );
+  dernier = res;
+  return res;
 }
 
 function toPushSubscription(sub: StoredPushSubscription): webpush.PushSubscription {
