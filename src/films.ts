@@ -13,6 +13,7 @@ import express, { type Request, type Response } from "express";
 import { askGeminiCreatif, askGeminiEmail, askGeminiJson, isGeminiConfigured } from "./gemini.js";
 import { notifier } from "./notifications.js";
 import { verifierRegles, tropProche, legendes } from "./studio.js";
+import { capturesFilm, consigne2, defaut2, finale2, nbMots2, nbRires2, nettoyer2, versScenes, type Phrase, type Storyboard } from "./films2.js";
 
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "auth_info");
 const FILMS_DIR = path.join(AUTH_DIR, "qg", "films");
@@ -36,6 +37,9 @@ export interface Film {
   /** Legendes pretes a publier (modifiables dans le QG). */
   legendes?: Legs;
   scenes: Scene[];
+  /** Moteur « fait main » du PC (film2) : le storyboard phrase par phrase ; les scenes n'en gardent que le texte. */
+  moteur?: "film2";
+  storyboard?: Storyboard;
   statut: Statut;
   voix: boolean;
   fichier?: string;
@@ -353,6 +357,50 @@ const toutesLesLignes = (scenes: Scene[]) => scenes.flatMap((s) => s.lignes);
 export const texteVoix = (scenes: Scene[]) => scenes.map((s) => (typeof s.voixBalisee === "string" && s.voixBalisee) || s.lignes.join(" ")).join("\n\n");
 const texteLu = (scenes: Scene[]) => scenes.map((s) => s.lignes.join(" ")).join("\n\n");
 
+/** Fait ecrire le storyboard « fait main » par Gemini (film2), avec plusieurs essais. */
+async function ecrireStoryboard(o: { sujet: string; note: string; duree: number; ton: string; recents: string[]; cta: string }): Promise<{ titre: string; phrases: Phrase[] } | { erreur: string }> {
+  const vise = motsVises(o.duree);
+  const rire = TONS_QUI_RIENT.includes(o.ton);
+  const captures = capturesFilm(bibliotheque());
+  let dernier = "", rappel = "";
+  let meilleur: { titre: string; phrases: Phrase[] } | null = null;
+  for (let essai = 0; essai < 4; essai++) {
+    const r = await ecrireScript(o.ton)(consigne2({ sujet: o.sujet, note: o.note, recents: o.recents, duree: o.duree, mots: vise, ton: o.ton, captures, rire }) + `
+
+TON : ${(TONS[o.ton] ?? TONS.chaleureux).ia}.` + rappel);
+    const x = r.ok && r.text ? extraire(r.text) : null;
+    if (!x) { dernier = r.error || "Réponse illisible."; continue; }
+    const { phrases, erreurs } = nettoyer2(x.phrases, captures);
+    const defaut = defaut2(phrases);
+    if (defaut) { dernier = defaut + (erreurs[0] ? " (" + erreurs[0] + ")" : ""); rappel = `
+
+ATTENTION : ton essai précédent a été refusé : ${defaut}`; continue; }
+    { const faible = accrocheFaible([phrases[0].texte.split(/\s+/).slice(0, 8).join(" ")]); if (faible) { dernier = faible; continue; } }
+    const alertes = verifierRegles(JSON.stringify(phrases.map((p) => [p.texte, p.accessoires, p.evenements])));
+    if (alertes.length) { dernier = alertes[0]; rappel = `
+
+ATTENTION : ${alertes[0]}`; continue; }
+    if (o.recents.some((r2) => tropProche(r2, phrases[0].texte))) { dernier = "Accroche trop proche d'une récente."; continue; }
+    const nb = nbMots2(phrases);
+    const cand = { titre: court(x.titre, 80), phrases };
+    if (!meilleur || Math.abs(nb - vise) < Math.abs(nbMots2(meilleur.phrases) - vise)) meilleur = cand;
+    if (nb < vise * 0.8 || nb > vise * 1.25) { dernier = `${nb} mots au lieu de ${vise}.`; rappel = `
+
+ATTENTION : ton essai précédent faisait ${nb} mots. Il en faut ${vise} : ${nb < vise ? "ajoute des phrases" : "raccourcis"}.`; continue; }
+    if (rire && nbRires2(phrases) < 2) { dernier = "Pas assez de rires."; rappel = "\n\nATTENTION : il manque les balises [laughs], [chuckles] dans le champ voix (3 à 5)."; continue; }
+    meilleur = cand;
+    break;
+  }
+  if (!meilleur || nbMots2(meilleur.phrases) < vise * 0.55) return { erreur: "Le storyboard n'a pas pu être écrit : " + dernier };
+  if (rire && !meilleur.phrases.some((p) => p.voix)) {
+    const ph = meilleur.phrases;
+    ph[0].voix = "[chuckles] " + ph[0].texte;
+    ph[ph.length - 1].voix = ph[ph.length - 1].texte + " [laughs]";
+  }
+  return { titre: meilleur.titre, phrases: [...meilleur.phrases, ...finale2(o.cta || undefined)] };
+}
+const avecStoryboard = (f: Film, titre: string, phrases: Phrase[]) => { f.moteur = "film2"; f.storyboard = { titre, phrases }; f.scenes = versScenes(phrases); };
+
 // ───────────── Routes protegees par le mot de passe du QG ─────────────
 export const filmsRouter = express.Router();
 
@@ -427,7 +475,7 @@ filmsRouter.get("/", (_req, res) => {
 filmsRouter.post("/script", express.json({ limit: "64kb" }), async (req: Request, res: Response) => {
   const b = (req.body ?? {}) as Record<string, unknown>;
   const sujetId = court(b.sujet, 40);
-  const format = ["9:16", "1:1", "16:9"].includes(String(b.format)) ? (String(b.format) as Film["format"]) : "9:16";
+  const format = ["9:16", "1:1", "16:9"].includes(String(b.format)) ? (String(b.format) as Film["format"]) : "1:1";
   let fond = ["photo", "degrade", "uni", "motif"].includes(String(b.fond)) ? (String(b.fond) as Film["fond"]) : "photo";
   let variante = "";
   if (String(b.fond) === "auto" || !b.fond) ({ fond, variante } = choisirFond(tous()));
@@ -437,6 +485,22 @@ filmsRouter.post("/script", express.json({ limit: "64kb" }), async (req: Request
   const ton = TONS[String(b.ton)] ? String(b.ton) : "chaleureux";
   let titre = preset?.titre ?? libre ?? "Film";
   let scenes: Scene[];
+  const motCta = court(b.cta, 24).toUpperCase().replace(/[^A-Z0-9 ]/g, "").trim();
+  // Moteur « fait main » (film2) par defaut ; l'ancien moteur a modeles reste possible avec moteur: "ancien".
+  if (b.moteur !== "ancien") {
+    if (!isGeminiConfigured()) { res.status(503).json({ ok: false, erreur: "L'IA n'est pas configurée sur le serveur (GEMINI_API_KEY)." }); return; }
+    if (sujetId === "libre" && libre.length < 8) { res.status(400).json({ ok: false, erreur: "Décris le sujet en une phrase." }); return; }
+    const recents = tous().slice(0, 8).map((f) => (f.storyboard?.phrases[0]?.texte ?? f.scenes[0]?.lignes.join(" ") ?? "")).filter(Boolean);
+    const sujetTexte = sujetId === "libre" ? libre : sujetId === "hasard" ? "choisis toi-même un sujet original et utile sur l'envoi de colis avec Delivrou" : (preset?.titre ?? libre);
+    const noteSujet = sujetId === "hasard" ? `Sujets déjà traités, à ne pas reprendre : ${tous().slice(0, 12).map((f) => f.titre).join(" ; ") || "aucun"}. Écris dans « titre » le sujet que tu as choisi.` : (preset?.note ?? "");
+    const sb = await ecrireStoryboard({ sujet: sujetTexte, note: noteSujet, duree, ton, recents, cta: motCta });
+    if ("erreur" in sb) { res.status(422).json({ ok: false, erreur: sb.erreur }); return; }
+    const film: Film = { id: `${Date.now().toString(36)}-${crypto.randomBytes(2).toString("hex")}`, date: new Date().toISOString(), sujet: sujetId || "libre", titre: sb.titre || titre, format, fond, variante, graine: crypto.randomBytes(4).toString("hex"), duree, ton, scenes: [], statut: "attente_voix", voix: false };
+    avecStoryboard(film, film.titre, sb.phrases);
+    ecrire(film);
+    res.json({ ok: true, film: { ...film, texte: texteVoix(film.scenes) } });
+    return;
+  }
   if (sujetId === "colis" && !TONS_QUI_RIENT.includes(ton)) {
     scenes = PRESET_COLIS;
   } else {
@@ -598,6 +662,7 @@ filmsRouter.post("/:id/refaire", express.json({ limit: "8kb" }), async (req: Req
   if (["photo", "degrade", "uni", "motif"].includes(String(b.fond))) { fond = String(b.fond) as Film["fond"]; variante = ""; }
   const id = `${Date.now().toString(36)}-${crypto.randomBytes(2).toString("hex")}`;
   const base: Film = { id, date: new Date().toISOString(), sujet: f.sujet, titre: f.titre, duree: f.duree, ton: f.ton, format, fond, variante, graine: crypto.randomBytes(4).toString("hex"), scenes: f.scenes, statut: "attente_voix", voix: false };
+  if (f.storyboard) { base.moteur = "film2"; base.storyboard = f.storyboard; }
   if (!demande) {
     fs.mkdirSync(dossier(id), { recursive: true });
     const v = path.join(dossier(f.id), "voix.mp3");
@@ -610,6 +675,17 @@ filmsRouter.post("/:id/refaire", express.json({ limit: "8kb" }), async (req: Req
     return;
   }
   if (!isGeminiConfigured()) { res.status(503).json({ ok: false, erreur: "L'IA n'est pas configurée sur le serveur." }); return; }
+  if (f.storyboard) {
+    const sansFin = f.storyboard.phrases.filter((p) => p.plan !== "fin");
+    const cta = f.storyboard.phrases.find((p) => p.cta?.startsWith("Commente "))?.cta?.slice(9) ?? "";
+    const sb = await ecrireStoryboard({ sujet: f.titre, note: `MODIFIE un storyboard existant selon cette demande de l'équipe : « ${demande} ». Storyboard actuel (JSON) : ${JSON.stringify(sansFin)}. Garde ce qui n'est pas concerné par la demande.`, duree: f.duree ?? 40, ton: f.ton ?? "chaleureux", recents: [], cta });
+    if ("erreur" in sb) { res.status(422).json({ ok: false, erreur: sb.erreur }); return; }
+    avecStoryboard(base, sb.titre || f.titre, sb.phrases);
+    base.titre = sb.titre || f.titre;
+    ecrire(base);
+    res.json({ ok: true, film: { ...base, texte: texteVoix(base.scenes) }, ia: true });
+    return;
+  }
   const permises = permisesNotees(f.sujet);
   const note = `MODIFIE un script existant selon cette demande de l'équipe : « ${demande} ». Script actuel (JSON) : ${JSON.stringify(f.scenes.map((s) => ({ ...s, type: s.type })))}. Garde ce qui n'est pas concerné par la demande.`;
   let ok: Scene[] | null = null;
@@ -658,7 +734,7 @@ filmsMachineRouter.get("/a-produire", (_req, res) => {
   dernierPassagePc = Date.now();
   // Un film "en production" sans nouvelle depuis 10 min : le PC a ete coupe en plein rendu, on le reprend.
   const abandonne = (f: Film) => f.statut === "en_production" && Date.now() - new Date(f.maj ?? 0).getTime() > 10 * 60_000;
-  res.json({ ok: true, films: tous().filter((f) => f.statut === "a_produire" || abandonne(f)).map((f) => ({ id: f.id, titre: f.titre, format: f.format, fond: f.fond, variante: f.variante ?? "", graine: f.graine ?? f.id, scenes: f.scenes })) });
+  res.json({ ok: true, films: tous().filter((f) => f.statut === "a_produire" || abandonne(f)).map((f) => ({ id: f.id, titre: f.titre, format: f.format, fond: f.fond, variante: f.variante ?? "", graine: f.graine ?? f.id, scenes: f.scenes, ...(f.storyboard ? { moteur: "film2", storyboard: f.storyboard } : {}) })) });
 });
 /** Une video deja faite ailleurs (le fichier est deja envoye sous films/<id>/film.mp4) : elle arrive dans la liste, prete a programmer. */
 filmsMachineRouter.post("/importer", express.json({ limit: "16kb" }), (req: Request, res: Response) => {
